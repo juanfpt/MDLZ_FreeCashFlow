@@ -1,0 +1,85 @@
+(Scenario_1 as table, Scenario_2 as table) as table =>
+let
+
+    //Get system username ========================================================================================================
+
+    fnGetUsername = () =>
+        let
+            Source = Folder.Contents("C:\Users\"),
+            #"Expanded Attributes" = Table.ExpandRecordColumn(Source, "Attributes", {"Hidden", "Directory", "ChangeTime"}, {"Hidden", "Directory", "ChangeTime"}),
+            #"Filtered Directories not hidden" = Table.SelectRows(#"Expanded Attributes", each ([Directory] = true) and ([Hidden] = false)),
+            #"Removed Errors" = Table.RemoveRowsWithErrors(#"Filtered Directories not hidden", {"ChangeTime"}),
+	    #"Filtered Rows" = Table.SelectRows(#"Removed Errors", each ([Name] <> "Public")),
+	    Username = #"Filtered Rows"{0}[Name]
+        in
+            Username,
+		
+    //Get Base Path ========================================================================================================
+
+    fnGetBasePath = (username as text) as text =>
+        "C:\Users\" & username & "\MDLZ\Cash Flow Planning WACAM - Documents\Cash Flow Mensual\FCF Internal Report\",
+
+    //Internal Fixed Tables ========================================================================================================
+
+    Username = fnGetUsername(),
+    BasePath = fnGetBasePath(Username),
+
+    PNL_Accounts = let
+        FilePath = BasePath & "Code Instructions\Support\PNL Accounts.txt",
+        FileContent = Text.FromBinary(File.Contents(FilePath)),
+        Result = Expression.Evaluate(FileContent, #shared)
+    in
+        Result,
+
+    Products = let
+        FilePath = BasePath & "Code Instructions\Support\Products.txt",
+        FileContent = Text.FromBinary(File.Contents(FilePath)),
+        Result = Expression.Evaluate(FileContent, #shared)
+    in
+        Result,
+
+    Countries_Index = let
+        FilePath = BasePath & "Code Instructions\Support\Countries_Index.txt",
+        FileContent = Text.FromBinary(File.Contents(FilePath)),
+        Result = Expression.Evaluate(FileContent, #shared)
+    in
+        Result,
+
+    //Main Function ====================================================================================================================
+
+    Source = Table.FromRows(Json.Document(Binary.Decompress(Binary.FromText("i44FAA==", BinaryEncoding.Base64), Compression.Deflate)), let _t = ((type nullable text) meta [Serialized.Text = true]) in type table [Column1 = _t]),
+    #"Changed Type" = Table.TransformColumnTypes(Source,{{"Column1", type text}}),
+    #"Appended Query" = Table.Combine({#"Changed Type", Scenario_1, Scenario_2}),
+    #"Removed Columns" = Table.RemoveColumns(#"Appended Query",{"Column1"}),
+    #"Renamed Columns" = Table.RenameColumns(#"Removed Columns",{{"Profile", "Scenario"}}),
+    #"Removed Columns1" = Table.RemoveColumns(#"Renamed Columns",{"Categoria Simulador P&L", "Categoria Leaky bucket", "Month PBR", "Country BPR", "Country Simulador P&L", "C1", "C2", "Quarter", "Half", "Linea P&L BPR", "Alloc", "Version", "Date", "Account", "Brand ID", "Brand Descr", "BU", "Entity", "Category ID 1", "Category ID 1 Description", "Format Flavor ID", "Channel", "LC", "BSP (L8)", "Desc BSP", "Ricolino", "Type"}),
+    #"Merged Queries" = Table.NestedJoin(#"Removed Columns1", {"P&L Line2"}, PNL_Accounts, {"P&L Line2"}, "PNL Accounts", JoinKind.LeftOuter),
+    #"Expanded PNL Accounts" = Table.ExpandTableColumn(#"Merged Queries", "PNL Accounts", {"Account", "Description"}, {"PNL Accounts.Account", "PNL Accounts.Description"}),
+    #"Renamed Columns2" = Table.RenameColumns(#"Expanded PNL Accounts",{{"PNL Accounts.Account", "Account"}, {"PNL Accounts.Description", "Description"}}),
+    #"Reordered Columns" = Table.ReorderColumns(#"Renamed Columns2",{"Format Flavor Descr", "P&L Line2", "Categoria BPR", "Period", "New Country", "Scenario", "Account", "Description", "Value"}),
+    #"Removed Columns2" = Table.RemoveColumns(#"Reordered Columns",{"P&L Line2"}),
+    #"Renamed Columns3" = Table.RenameColumns(#"Removed Columns2",{{"Format Flavor Descr", "Format Flavor"}}),
+    #"Merged Queries1" = Table.NestedJoin(#"Renamed Columns3", {"Categoria BPR"}, Products, {"Product"}, "Products", JoinKind.LeftOuter),
+    #"Expanded Products" = Table.ExpandTableColumn(#"Merged Queries1", "Products", {"Class"}, {"Products.Class"}),
+    #"Renamed Columns4" = Table.RenameColumns(#"Expanded Products",{{"Products.Class", "Category"}}),
+    #"Removed Columns3" = Table.RemoveColumns(#"Renamed Columns4",{"Categoria BPR"}),
+    #"Merged Queries2" = Table.NestedJoin(#"Removed Columns3", {"New Country"}, Countries_Index, {"Entity"}, "Countries", JoinKind.LeftOuter),
+    #"Expanded Countries" = Table.ExpandTableColumn(#"Merged Queries2", "Countries", {"Country"}, {"Countries.Country"}),
+    #"Removed Columns4" = Table.RemoveColumns(#"Expanded Countries",{"New Country"}),
+    #"Renamed Columns5" = Table.RenameColumns(#"Removed Columns4",{{"Countries.Country", "Country"}}),
+    #"Reordered Columns2" = Table.ReorderColumns(#"Renamed Columns5",{"Country", "Year", "Period", "Scenario", "Account", "Description", "Value", "Category", "Format Flavor"}),
+    #"Added Custom1" = Table.AddColumn(#"Reordered Columns2", "Base Rate", each "ACT"),
+    #"Changed Type2" = Table.TransformColumnTypes(#"Added Custom1",{{"Base Rate", type text}}),
+    #"Reordered Columns3" = Table.ReorderColumns(#"Changed Type2",{"Country", "Base Rate", "Year", "Period", "Scenario", "Account", "Description", "Value", "Category", "Format Flavor"}),
+    #"Added Custom2" = Table.AddColumn(#"Reordered Columns3", "Reporting Level", each if [Account]="229099" then "CF0007XX" else "CF0007"),
+    #"Changed Type3" = Table.TransformColumnTypes(#"Added Custom2",{{"Reporting Level", type text}}),
+    #"Reordered Columns4" = Table.ReorderColumns(#"Changed Type3",{"Reporting Level", "Country", "Base Rate", "Year", "Period", "Scenario", "Account", "Description", "Value", "Category", "Format Flavor"}),
+    #"Added Custom3" = Table.AddColumn(#"Reordered Columns4", "Custom", each [Value]/1000000),
+    #"Removed Columns5" = Table.RemoveColumns(#"Added Custom3",{"Value", "Format Flavor"}),
+    #"Changed Type4" = Table.TransformColumnTypes(#"Removed Columns5",{{"Custom", type number}}),
+    #"Renamed Columns6" = Table.RenameColumns(#"Changed Type4",{{"Custom", "Value"}}),
+    #"Reordered Columns5" = Table.ReorderColumns(#"Renamed Columns6",{"Reporting Level", "Country", "Base Rate", "Year", "Period", "Scenario", "Account", "Description", "Value", "Category"}),
+    #"Added Custom4" = Table.AddColumn(#"Reordered Columns5", "Currency", each "USD Total"),
+    #"Changed Type5" = Table.TransformColumnTypes(#"Added Custom4",{{"Currency", type text}})
+in
+    #"Changed Type5"
