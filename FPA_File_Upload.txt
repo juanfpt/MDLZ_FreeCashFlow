@@ -1,0 +1,70 @@
+(RelativeFilePath as text, Scenario as text, Year as text) as table =>
+
+let
+
+    //Get system username ========================================================================================================
+
+    fnGetUsername = () =>
+        let
+            Source = Folder.Contents("C:\Users\"),
+            #"Expanded Attributes" = Table.ExpandRecordColumn(Source, "Attributes", {"Hidden", "Directory", "ChangeTime"}, {"Hidden", "Directory", "ChangeTime"}),
+            #"Filtered Directories not hidden" = Table.SelectRows(#"Expanded Attributes", each ([Directory] = true) and ([Hidden] = false)),
+            #"Removed Errors" = Table.RemoveRowsWithErrors(#"Filtered Directories not hidden", {"ChangeTime"}),
+	    #"Filtered Rows" = Table.SelectRows(#"Removed Errors", each ([Name] <> "Public")),
+	    Username = #"Filtered Rows"{0}[Name]
+        in
+            Username,
+		
+    //Get Base Path ========================================================================================================
+
+    fnGetBasePath = (username as text) as text =>
+        "C:\Users\" & username & "\MDLZ\Cash Flow Planning WACAM - Documents\Cash Flow Mensual\FCF Internal Report\",
+
+    //Internal Fixed Tables ========================================================================================================
+
+    Username = fnGetUsername(),
+    BasePath = fnGetBasePath(Username),
+
+    Countries_Index = let
+        FilePath = BasePath & "Code Instructions\Support\Countries_Index.txt",
+        FileContent = Text.FromBinary(File.Contents(FilePath)),
+        Result = Expression.Evaluate(FileContent, #shared)
+    in
+        Result,
+
+    //Main Function ====================================================================================================================
+
+    Origen= Excel.Workbook(File.Contents(BasePath & "Data Repository\Forecasting\" & RelativeFilePath), null, true),
+    Sheet1_Sheet = Origen{[Item="Sheet1",Kind="Sheet"]}[Data],
+    #"Promoted Headers" = Table.PromoteHeaders(Sheet1_Sheet, [PromoteAllScalars=true]),
+    Last_Columns = List.LastN(Table.ColumnNames(#"Promoted Headers"), 6),
+    #"Remove Last Columns" = Table.RemoveColumns(#"Promoted Headers", Last_Columns),
+    #"Changed Type" = Table.TransformColumnTypes(#"Remove Last Columns",{{"Alloc", type text}, {"Version", type text}, {"Date", Int64.Type}, {"Account", type text}, {"Brand ID", type text}, {"Brand Descr", type text}, {"BU", type text}, {"Entity", type text}, {"Category ID 1", type text}, {"Category ID 1 Description", type text}, {"Format Flavor ID", type text}, {"Format Flavor Descr", type text}, {"Channel", type text}, {"LC", type number}, {"BSP (L8)", type text}, {"Desc BSP", type text}, {"Ricolino", type any}, {"Type", type any}, {"Linea P&L BPR", type text}, {"P&L Line2", type text}, {"Categoria BPR", type text}, {"Categoria Simulador P&L", type text}, {"Categoria Leaky bucket", type text}, {"Month PBR", type text}, {"Period", type text}, {"Country BPR", type text}, {"New Country", type text}, {"Country Simulador P&L", type text}, {"C1", type text}, {"C2", type text}, {"Quarter", type text}, {"Half", type text}}),
+    #"Added Custom" = Table.AddColumn(#"Changed Type", "Year", each Year),
+    #"Changed Type1" = Table.TransformColumnTypes(#"Added Custom",{{"Year", type text}}),
+    #"Added Custom1" = Table.AddColumn(#"Changed Type1", "Key Date", each Date.EndOfMonth(Date.FromText([Year]&[Period]&"01", "en-US"))),
+    #"Changed Type2" = Table.TransformColumnTypes(#"Added Custom1",{{"Key Date", type date}}),
+    #"Merged Queries" = Table.NestedJoin(#"Changed Type2", {"New Country"}, Countries_Index, {"Entity"}, "Countries", JoinKind.LeftOuter),
+    #"Expanded Countries" = Table.ExpandTableColumn(#"Merged Queries", "Countries", {"Country"}, {"Countries.Country"}),
+    #"Renamed Columns" = Table.RenameColumns(#"Expanded Countries",{{"Countries.Country", "Country"}}),
+    #"Replaced Value" = Table.ReplaceValue(#"Renamed Columns","LX","AMEX",Replacer.ReplaceText,{"Country"}),
+    #"Replaced Value1" = Table.ReplaceValue(#"Replaced Value","CL","CH",Replacer.ReplaceText,{"Country"}),
+    #"Added Custom2" = Table.AddColumn(#"Replaced Value1", "ID", each [Country] & Date.MonthName([Key Date]) & Number.ToText(Date.Year([Key Date])) & "Plrate" & "FCST3"),
+    #"Changed Type3" = Table.TransformColumnTypes(#"Added Custom2",{{"ID", type text}}),
+    #"Merged Queries1" = Table.NestedJoin(#"Changed Type3", {"ID"}, #"Foreign_Exchange [Master]", {"ID"}, "Foreign_Exchange [Master]", JoinKind.LeftOuter),
+    #"Expanded Foreign_Exchange [Master]" = Table.ExpandTableColumn(#"Merged Queries1", "Foreign_Exchange [Master]", {"Value"}, {"Foreign_Exchange [Master].Value"}),
+    #"Renamed Columns1" = Table.RenameColumns(#"Expanded Foreign_Exchange [Master]",{{"Foreign_Exchange [Master].Value", "FX Value"}}),
+    #"Added Custom4" = Table.AddColumn(#"Renamed Columns1", "Custom", each if [#"Linea P&L BPR"] = "Volume" then 1 else [FX Value]),
+    #"Changed Type5" = Table.TransformColumnTypes(#"Added Custom4",{{"Custom", type number}}),
+    #"Removed Columns" = Table.RemoveColumns(#"Changed Type5",{"FX Value"}),
+    #"Renamed Columns2" = Table.RenameColumns(#"Removed Columns",{{"Custom", "FX Value"}}),
+    #"Added Custom5" = Table.AddColumn(#"Renamed Columns2", "FX Value Clean", each if [Alloc] = "YES" then 1 else [FX Value]),
+    #"Changed Type6" = Table.TransformColumnTypes(#"Added Custom5",{{"FX Value Clean", type number}}),
+    #"Removed Columns2" = Table.RemoveColumns(#"Changed Type6",{"FX Value"}),
+    #"Renamed Columns3" = Table.RenameColumns(#"Removed Columns2",{{"FX Value Clean", "FX Value"}}),
+    #"Added Custom3" = Table.AddColumn(#"Renamed Columns3", "Value", each [LC]/[FX Value]),
+    #"Changed Type4" = Table.TransformColumnTypes(#"Added Custom3",{{"Value", type number}}),
+    #"Removed Columns1" = Table.RemoveColumns(#"Changed Type4",{"Key Date", "Country", "ID", "FX Value"}),
+    #"Added Custom6" = Table.AddColumn(#"Removed Columns1", "Profile", each Scenario)
+in
+    #"Added Custom6"

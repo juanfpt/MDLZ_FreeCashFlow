@@ -1,0 +1,19 @@
+(FPA_Scenario as table, Year as text) as table =>
+let
+
+    //Query already created ========================================================================================================
+
+    PL_FPA = #"PL_FPA",
+
+    //Main Function ====================================================================================================================
+
+    Source = FPA_Scenario,
+    #"Grouped Rows" = Table.Group(Source, {"Format Flavor Descr", "P&L Line2", "Categoria BPR", "Period", "Profile"}, {{"SumValue", each List.Sum([#"Value"]), type nullable number}}),
+    #"Renamed Columns" = Table.RenameColumns(#"Grouped Rows",{{"SumValue", "Value"}}),
+    #"Added Custom" = Table.AddColumn(#"Renamed Columns", "New Country", each "WACAM"),
+    #"Changed Type" = Table.TransformColumnTypes(#"Added Custom",{{"New Country", type text}}),
+    #"Added Custom1" = Table.AddColumn(#"Changed Type", "Year", each Year),
+    #"Changed Type1" = Table.TransformColumnTypes(#"Added Custom1",{{"Year", type text}}),
+    #"Appended Query" = Table.Combine({PL_FPA, #"Changed Type1"})
+in
+    #"Appended Query"
