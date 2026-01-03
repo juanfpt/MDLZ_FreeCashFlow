@@ -31,10 +31,10 @@ let
 	   {"FilePath", type text},
 	   {"Scenario", type text},
 	   {"Year", type text},
-	   {"Active", type text},
+	   {"Active", type logical},
 	   {"Source", type text}
 	}),
-    #"Filtered Active and FPA" = Table.SelectRows(#"Changed Type", each [Active] = "TRUE" and [Source] = "FPA"),
+    #"Filtered Active and FPA" = Table.SelectRows(#"Changed Type", each [Active] = true and [Source] = "FPA"),
     ConfigTable = #"Filtered Active and FPA",
 
     //FPA File Upload ========================================================================================================
@@ -98,7 +98,7 @@ let
 
     #"Removed Columns" = Table.RemoveColumns(#"Appended Query",{"Column1"}),
     #"Renamed Columns" = Table.RenameColumns(#"Removed Columns",{{"Profile", "Scenario"}}),
-    #"Removed Columns1" = Table.RemoveColumns(#"Renamed Columns",{"Categoria Simulador P&L", "Categoria Leaky bucket", "Month PBR", "Country BPR", "Country Simulador P&L", "C1", "C2", "Quarter", "Half", "Linea P&L BPR", "Alloc", "Version", "Date", "Account", "Brand ID", "Brand Descr", "BU", "Entity", "Category ID 1", "Category ID 1 Description", "Format Flavor ID", "Channel", "LC", "BSP (L8)", "Desc BSP", "Ricolino", "Type"}),
+    #"Removed Columns1" = Table.RemoveColumns(#"Renamed Columns",{"Categoria Simulador P&L", "Categoria Leaky bucket", "Month PBR", "Country BPR", "Country Simulador P&L", "C1", "C2", "Quarter", "Half Year", "Linea P&L BPR", "Brand ID", "Brand Descr", "Account", "Alloc", "Version", "Date"}),
     #"Merged Queries" = Table.NestedJoin(#"Removed Columns1", {"P&L Line2"}, PNL_Accounts, {"P&L Line2"}, "PNL Accounts", JoinKind.LeftOuter),
     #"Expanded PNL Accounts" = Table.ExpandTableColumn(#"Merged Queries", "PNL Accounts", {"Account", "Description"}, {"PNL Accounts.Account", "PNL Accounts.Description"}),
     #"Renamed Columns2" = Table.RenameColumns(#"Expanded PNL Accounts",{{"PNL Accounts.Account", "Account"}, {"PNL Accounts.Description", "Description"}}),
@@ -131,35 +131,20 @@ let
 
     //WC Table ========================================================================================================
 
-    #"Added WC Consolidation" = Table.AddColumn(ConfigTable, "Consolidated_WACAM", 
-        each 
-            let
-                ProfileData = Table.SelectRows(PL_FPA_Country, 
-                    (row) => row[Scenario] = [Scenario] and row[Year] = [Year]
-                ),
-                Grouped = Table.Group(ProfileData, 
-                    {"Reporting Level", "Base Rate", "Period", "Scenario", "Account", "Description", "Category", "Currency"}, 
-                    {{"SumValue", each List.Sum([Value]), type nullable number}}
-                ),
-                Renamed = Table.RenameColumns(Grouped, {{"SumValue", "Value"}}),
-                AddedCountry = Table.AddColumn(Renamed, "Country", each "WACAM"),
-                AddedYear = Table.AddColumn(AddedCountry, "Year", each [Year]),
-                ChangedType = Table.TransformColumnTypes(AddedYear, 
-                    {{"Country", type text}, {"Year", type text}}
-                ),
-                Reordered = Table.ReorderColumns(ChangedType, 
-                    {"Reporting Level", "Country", "Base Rate", "Year", "Period", "Scenario", 
-                     "Account", "Description", "Value", "Category", "Currency"}
-                )
-            in
-                Reordered
+    #"WC Grouped" = Table.Group(PL_FPA_Country, 
+        {"Reporting Level", "Base Rate", "Year", "Period", "Scenario", "Account", "Description", "Category", "Currency"}, 
+        {{"SumValue", each List.Sum([Value]), type nullable number}}
     ),
-    
-    WC_Tables = #"Added WC Consolidation"[Consolidated_WACAM],
-    #"Combined WC" = Table.Combine(WC_Tables),
+    #"WC Renamed" = Table.RenameColumns(#"WC Grouped", {{"SumValue", "Value"}}),
+    #"WC Added Country" = Table.AddColumn(#"WC Renamed", "Country", each "WACAM"),
+    #"WC Changed Type" = Table.TransformColumnTypes(#"WC Added Country", {{"Country", type text}}),
+    #"WC Reordered" = Table.ReorderColumns(#"WC Changed Type", 
+        {"Reporting Level", "Country", "Base Rate", "Year", "Period", "Scenario", 
+         "Account", "Description", "Value", "Category", "Currency"}
+    ),
     
     //Combine Table ========================================================================================================
 
-    #"Final Combined" = Table.Combine({PL_FPA_Country, #"Combined WC"})
+    #"Final Combined" = Table.Combine({PL_FPA_Country, #"WC Reordered"})
 in
     #"Final Combined"
