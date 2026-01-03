@@ -1,0 +1,194 @@
+() as table =>
+let
+    //==================================================
+    // FUNCIONES AUXILIARES
+    //==================================================
+    fnGetUsername = () =>
+        let
+            Source = Folder.Contents("C:\Users\"),
+            #"Expanded Attributes" = Table. ExpandRecordColumn(Source, "Attributes", 
+                {"Hidden", "Directory", "ChangeTime"}, 
+                {"Hidden", "Directory", "ChangeTime"}
+            ),
+            #"Filtered Directories not hidden" = Table.SelectRows(#"Expanded Attributes", 
+                each [Directory] = true and [Hidden] = false
+            ),
+            #"Removed Errors" = Table.RemoveRowsWithErrors(#"Filtered Directories not hidden", {"ChangeTime"}),
+            #"Filtered Rows" = Table.SelectRows(#"Removed Errors", each [Name] <> "Public"),
+            Username = #"Filtered Rows"{0}[Name]
+        in
+            Username,
+    
+    fnGetBasePath = (username as text) as text =>
+        "C:\Users\" & username & "\MDLZ\Cash Flow Planning WACAM - Documents\Cash Flow Mensual\FCF Internal Report\",
+    
+    //==================================================
+    // CARGAR CONFIGURACIÓN (desde consulta del mismo archivo)
+    //==================================================
+    Username = fnGetUsername(),
+    BasePath = fnGetBasePath(Username),
+    
+    // ✅ SIMPLIFICADO: Referenciar la consulta FPA_Config
+    ConfigTable = FPA_Config,
+    
+    //==================================================
+    // CARGAR FUNCIÓN FPA_FILE_UPLOAD
+    //==================================================
+    fnFPA_File_Upload = let
+        FilePath = BasePath & "Code Instructions\FPA_File_Upload. txt",
+        FileContent = Text.FromBinary(File.Contents(FilePath)),
+        Result = Expression. Evaluate(FileContent, #shared)
+    in
+        Result,
+    
+    //==================================================
+    // PROCESAR TODOS LOS ARCHIVOS ACTIVOS
+    //==================================================
+    #"Added Loaded Data" = Table.AddColumn(ConfigTable, "Data", 
+        each fnFPA_File_Upload([FilePath], [Scenario], [Year])
+    ),
+    
+    LoadedTables = #"Added Loaded Data"[Data],
+    
+    // Tabla base vacía
+    EmptyTable = Table.FromRows(
+        Json.Document(
+            Binary.Decompress(
+                Binary.FromText("i44FAA==", BinaryEncoding.Base64), 
+                Compression.Deflate
+            )
+        ), 
+        let _t = ((type nullable text) meta [Serialized.Text = true]) 
+        in type table [Column1 = _t]
+    ),
+    #"Changed Type Empty" = Table.TransformColumnTypes(EmptyTable, {{"Column1", type text}}),
+    
+    AllTables = List.Combine({{#"Changed Type Empty"}, LoadedTables}),
+    #"Appended Query" = Table.Combine(AllTables),
+    
+    //==================================================
+    // CARGAR TABLAS DE SOPORTE
+    //==================================================
+    PNL_Accounts = let
+        FilePath = BasePath & "Code Instructions\Support\PNL Accounts.txt",
+        FileContent = Text.FromBinary(File.Contents(FilePath)),
+        Result = Expression.Evaluate(FileContent, #shared)
+    in
+        Result,
+    
+    Products = let
+        FilePath = BasePath & "Code Instructions\Support\Products.txt",
+        FileContent = Text.FromBinary(File.Contents(FilePath)),
+        Result = Expression.Evaluate(FileContent, #shared)
+    in
+        Result,
+    
+    Countries_Index = let
+        FilePath = BasePath & "Code Instructions\Support\Countries_Index.txt",
+        FileContent = Text.FromBinary(File.Contents(FilePath)),
+        Result = Expression.Evaluate(FileContent, #shared)
+    in
+        Result,
+    
+    //==================================================
+    // APLICAR TRANSFORMACIONES DE P&L_FPA
+    //==================================================
+    #"Removed Columns" = Table.RemoveColumns(#"Appended Query", {"Column1"}),
+    #"Renamed Columns" = Table.RenameColumns(#"Removed Columns", {{"Profile", "Scenario"}}),
+    #"Removed Columns1" = Table.RemoveColumns(#"Renamed Columns", 
+        {"Categoria Simulador P&L", "Categoria Leaky bucket", "Month PBR", "Country BPR", 
+         "Country Simulador P&L", "C1", "C2", "Quarter", "Half Year", "Linea P&L BPR", 
+         "Brand ID", "Brand Descr", "Account", "Alloc", "Version", "Date"}
+    ),
+    #"Merged Queries" = Table. NestedJoin(#"Removed Columns1", {"P&L Line2"}, PNL_Accounts, 
+        {"P&L Line2"}, "PNL Accounts", JoinKind. LeftOuter
+    ),
+    #"Expanded PNL Accounts" = Table.ExpandTableColumn(#"Merged Queries", "PNL Accounts", 
+        {"Account", "Description"}, {"PNL Accounts. Account", "PNL Accounts.Description"}
+    ),
+    #"Renamed Columns2" = Table.RenameColumns(#"Expanded PNL Accounts", 
+        {{"PNL Accounts.Account", "Account"}, {"PNL Accounts.Description", "Description"}}
+    ),
+    #"Reordered Columns" = Table. ReorderColumns(#"Renamed Columns2", 
+        {"Format Flavor Descr", "P&L Line2", "Categoria BPR", "Period", "New Country", 
+         "Scenario", "Account", "Description", "Value"}
+    ),
+    #"Removed Columns2" = Table.RemoveColumns(#"Reordered Columns", {"P&L Line2"}),
+    #"Renamed Columns3" = Table.RenameColumns(#"Removed Columns2", {{"Format Flavor Descr", "Format Flavor"}}),
+    #"Merged Queries1" = Table.NestedJoin(#"Renamed Columns3", {"Categoria BPR"}, Products, 
+        {"Product"}, "Products", JoinKind.LeftOuter
+    ),
+    #"Expanded Products" = Table.ExpandTableColumn(#"Merged Queries1", "Products", {"Class"}, {"Products.Class"}),
+    #"Renamed Columns4" = Table.RenameColumns(#"Expanded Products", {{"Products.Class", "Category"}}),
+    #"Removed Columns3" = Table.RemoveColumns(#"Renamed Columns4", {"Categoria BPR"}),
+    #"Merged Queries2" = Table. NestedJoin(#"Removed Columns3", {"New Country"}, Countries_Index, 
+        {"Entity"}, "Countries", JoinKind.LeftOuter
+    ),
+    #"Expanded Countries" = Table.ExpandTableColumn(#"Merged Queries2", "Countries", {"Country"}, {"Countries.Country"}),
+    #"Removed Columns4" = Table.RemoveColumns(#"Expanded Countries", {"New Country"}),
+    #"Renamed Columns5" = Table. RenameColumns(#"Removed Columns4", {{"Countries.Country", "Country"}}),
+    #"Reordered Columns2" = Table.ReorderColumns(#"Renamed Columns5", 
+        {"Country", "Year", "Period", "Scenario", "Account", "Description", "Value", "Category", "Format Flavor"}
+    ),
+    #"Added Custom1" = Table.AddColumn(#"Reordered Columns2", "Base Rate", each "ACT"),
+    #"Changed Type2" = Table.TransformColumnTypes(#"Added Custom1", {{"Base Rate", type text}}),
+    #"Reordered Columns3" = Table.ReorderColumns(#"Changed Type2", 
+        {"Country", "Base Rate", "Year", "Period", "Scenario", "Account", "Description", "Value", "Category", "Format Flavor"}
+    ),
+    #"Added Custom2" = Table.AddColumn(#"Reordered Columns3", "Reporting Level", 
+        each if [Account] = "229099" then "CF0007XX" else "CF0007"
+    ),
+    #"Changed Type3" = Table.TransformColumnTypes(#"Added Custom2", {{"Reporting Level", type text}}),
+    #"Reordered Columns4" = Table.ReorderColumns(#"Changed Type3", 
+        {"Reporting Level", "Country", "Base Rate", "Year", "Period", "Scenario", "Account", 
+         "Description", "Value", "Category", "Format Flavor"}
+    ),
+    #"Added Custom3" = Table.AddColumn(#"Reordered Columns4", "Custom", each [Value] / 1000000),
+    #"Removed Columns5" = Table.RemoveColumns(#"Added Custom3", {"Value", "Format Flavor"}),
+    #"Changed Type4" = Table.TransformColumnTypes(#"Removed Columns5", {{"Custom", type number}}),
+    #"Renamed Columns6" = Table.RenameColumns(#"Changed Type4", {{"Custom", "Value"}}),
+    #"Reordered Columns5" = Table.ReorderColumns(#"Renamed Columns6", 
+        {"Reporting Level", "Country", "Base Rate", "Year", "Period", "Scenario", "Account", 
+         "Description", "Value", "Category"}
+    ),
+    #"Added Custom4" = Table.AddColumn(#"Reordered Columns5", "Currency", each "USD Total"),
+    #"Changed Type5" = Table.TransformColumnTypes(#"Added Custom4", {{"Currency", type text}}),
+    
+    PL_FPA_Country = #"Changed Type5",
+    
+    //==================================================
+    // CONSOLIDAR POR PERFIL (P&L_FPA_WC)
+    //==================================================
+    #"Added WC Consolidation" = Table.AddColumn(ConfigTable, "Consolidated_WACAM", 
+        each 
+            let
+                ProfileData = Table.SelectRows(PL_FPA_Country, 
+                    (row) => row[Scenario] = [Scenario] and row[Year] = [Year]
+                ),
+                Grouped = Table.Group(ProfileData, 
+                    {"Reporting Level", "Base Rate", "Period", "Scenario", "Account", "Description", "Category", "Currency"}, 
+                    {{"SumValue", each List.Sum([Value]), type nullable number}}
+                ),
+                Renamed = Table.RenameColumns(Grouped, {{"SumValue", "Value"}}),
+                AddedCountry = Table.AddColumn(Renamed, "Country", each "WACAM"),
+                AddedYear = Table.AddColumn(AddedCountry, "Year", each [Year]),
+                ChangedType = Table.TransformColumnTypes(AddedYear, 
+                    {{"Country", type text}, {"Year", type text}}
+                ),
+                Reordered = Table.ReorderColumns(ChangedType, 
+                    {"Reporting Level", "Country", "Base Rate", "Year", "Period", "Scenario", 
+                     "Account", "Description", "Value", "Category", "Currency"}
+                )
+            in
+                Reordered
+    ),
+    
+    WC_Tables = #"Added WC Consolidation"[Consolidated_WACAM],
+    #"Combined WC" = Table. Combine(WC_Tables),
+    
+    //==================================================
+    // COMBINAR PAÍS + REGIÓN
+    //==================================================
+    #"Final Combined" = Table.Combine({PL_FPA_Country, #"Combined WC"})
+in
+    #"Final Combined"
