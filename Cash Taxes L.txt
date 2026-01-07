@@ -22,6 +22,17 @@ let
     fnGetBasePath = (username as text) as text =>
         "C:\Users\" & username & "\MDLZ\Cash Flow Planning WACAM - Documents\Cash Flow Mensual\FCF Internal Report\",
     
+    fnCountryMatches = (ruleCountry as text, actualCountry as text) as logical =>
+        let
+            RuleCountryUpper = Text.Upper(ruleCountry),
+            ActualCountryUpper = Text.Upper(actualCountry),
+            IsAll = RuleCountryUpper = "ALL",
+            CountryList = List.Transform(Text.Split(RuleCountryUpper, ","), each Text.Trim(_)),
+            IsInList = List.Contains(CountryList, ActualCountryUpper),
+            Matches = IsAll or IsInList
+        in
+            Matches,
+    
     //==================================================================================================================
     // CONFIGURATION
     //==================================================================================================================
@@ -30,7 +41,7 @@ let
     BasePath = fnGetBasePath(Username),
     
     // Ruta del archivo de configuración de clasificación
-    ClassificationFilePath = BasePath & "Data Repository\Configuration\Tax_Classification. xlsx",
+    ClassificationFilePath = BasePath & "Data Repository\Configuration\Tax_Classification.xlsx",
     
     //==================================================================================================================
     // LOAD CLASSIFICATION RULES FROM EXTERNAL EXCEL FILE
@@ -66,53 +77,53 @@ let
     fnClassifyTransaction = (textToClassify as text, country as text) as text =>
         let
             TextUpper = Text.Upper(textToClassify),
-            CountryUpper = Text.Upper(country),
             
-            // Filtrar reglas aplicables para este país
-            // Incluye reglas específicas del país Y reglas globales (ALL)
+            // Filtrar reglas aplicables para este país usando fnCountryMatches
             ApplicableRules = Table.SelectRows(ClassificationRulesSorted, 
-                each [Country] = CountryUpper or [Country] = "ALL"
+                each fnCountryMatches([Country], country)
             ),
             
-            // Buscar la primera categoría que coincida
-            MatchingCategory = 
+            // Nivel 1: Reglas específicas del país (match exacto)
+            CountrySpecificRules = Table.SelectRows(ApplicableRules, 
+                each Text.Upper([Country]) = Text.Upper(country)
+            ),
+            
+            // Nivel 2: Reglas multi-país (contiene comas)
+            MultiCountryRules = Table.SelectRows(ApplicableRules, 
+                each Text.Contains([Country], ",")
+            ),
+            
+            // Nivel 3: Reglas globales (ALL)
+            GlobalRules = Table.SelectRows(ApplicableRules, 
+                each Text.Upper([Country]) = "ALL"
+            ),
+            
+            // Función que busca coincidencia en una tabla de reglas (respeta el orden Priority)
+            FindMatch = (rules as table) as nullable text =>
                 let
-                    // Prioridad 1: Buscar en reglas específicas del país (ya ordenadas por Priority)
-                    CountrySpecificRules = Table.SelectRows(ApplicableRules, 
-                        each [Country] = CountryUpper
+                    // Buscar la primera keyword que coincida (orden por Priority)
+                    MatchingRows = Table.SelectRows(rules, 
+                        each Text.Contains(TextUpper, [Keyword])
                     ),
                     
-                    // Prioridad 2: Buscar en reglas globales (ya ordenadas por Priority)
-                    GlobalRules = Table.SelectRows(ApplicableRules, 
-                        each [Country] = "ALL"
-                    ),
-                    
-                    // Función que busca coincidencia en una tabla de reglas (respeta el orden Priority)
-                    FindMatch = (rules as table) as nullable text =>
-                        let
-                            // Buscar la primera keyword que coincida (orden por Priority)
-                            MatchingRows = Table.SelectRows(rules, 
-                                each Text.Contains(TextUpper, [Keyword])
-                            ),
-                            
-                            // Retornar la categoría de la primera coincidencia (mayor prioridad)
-                            FirstMatch = if Table. RowCount(MatchingRows) > 0 
-                                        then MatchingRows{0}[Category] 
-                                        else null
-                        in
-                            FirstMatch,
-                    
-                    // Buscar primero en reglas específicas, luego en globales
-                    CountryMatch = FindMatch(CountrySpecificRules),
-                    GlobalMatch = FindMatch(GlobalRules),
-                    
-                    FinalCategory = if CountryMatch <> null then CountryMatch 
-                                    else if GlobalMatch <> null then GlobalMatch 
-                                    else "Others"
+                    // Retornar la categoría de la primera coincidencia (mayor prioridad)
+                    FirstMatch = if Table.RowCount(MatchingRows) > 0 
+                                then MatchingRows{0}[Category] 
+                                else null
                 in
-                    FinalCategory
+                    FirstMatch,
+            
+            // Buscar en orden: país específico > multi-país > global
+            CountryMatch = FindMatch(CountrySpecificRules),
+            MultiCountryMatch = FindMatch(MultiCountryRules),
+            GlobalMatch = FindMatch(GlobalRules),
+            
+            FinalCategory = if CountryMatch <> null then CountryMatch 
+                            else if MultiCountryMatch <> null then MultiCountryMatch 
+                            else if GlobalMatch <> null then GlobalMatch 
+                            else "Others"
         in
-            MatchingCategory,
+            FinalCategory,
     
     //==================================================================================================================
     // DATA FOLDER PATH
