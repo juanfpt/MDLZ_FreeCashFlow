@@ -1,0 +1,353 @@
+let
+    //==================================================================================================================
+    // HELPER FUNCTIONS
+    //==================================================================================================================
+    
+    fnGetUsername = () =>
+        let
+            Source = Folder.Contents("C:\Users\"),
+            #"Expanded Attributes" = Table. ExpandRecordColumn(Source, "Attributes", 
+                {"Hidden", "Directory", "ChangeTime"}, 
+                {"Hidden", "Directory", "ChangeTime"}
+            ),
+            #"Filtered Directories not hidden" = Table.SelectRows(#"Expanded Attributes", 
+                each [Directory] = true and [Hidden] = false
+            ),
+            #"Removed Errors" = Table.RemoveRowsWithErrors(#"Filtered Directories not hidden", {"ChangeTime"}),
+            #"Filtered Rows" = Table.SelectRows(#"Removed Errors", each [Name] <> "Public"),
+            Username = #"Filtered Rows"{0}[Name]
+        in
+            Username,
+    
+    fnGetBasePath = (username as text) as text =>
+        "C:\Users\" & username & "\MDLZ\Cash Flow Planning WACAM - Documents\Cash Flow Mensual\FCF Internal Report\",
+    
+    fnCountryMatches = (ruleCountry as text, actualCountry as text) as logical =>
+        let
+            RuleCountryUpper = Text.Upper(ruleCountry),
+            ActualCountryUpper = Text.Upper(actualCountry),
+            IsAll = RuleCountryUpper = "ALL",
+            CountryList = List.Transform(
+                Text.Split(RuleCountryUpper, ","),
+                each Text. Trim(_)
+            ),
+            IsInList = List.Contains(CountryList, ActualCountryUpper),
+            Matches = IsAll or IsInList
+        in
+            Matches,
+    
+    //==================================================================================================================
+    // CONFIGURATION
+    //==================================================================================================================
+    
+    Username = fnGetUsername(),
+    BasePath = fnGetBasePath(Username),
+    ClassificationFilePath = BasePath & "Data Repository\Configuration\Tax_Classification.xlsx",
+    
+    //==================================================================================================================
+    // LOAD CLASSIFICATION RULES FROM EXTERNAL EXCEL FILE
+    //==================================================================================================================
+    
+    ClassificationWorkbook = Excel.Workbook(File.Contents(ClassificationFilePath), null, true),
+    ClassificationSheet = ClassificationWorkbook{[Item="TaxClassification",Kind="Table"]}[Data],
+    
+    ClassificationRules = Table.TransformColumnTypes(ClassificationSheet,
+        {
+            {"Country", type text},
+            {"Keyword", type text},
+            {"Category", type text},
+            {"Priority", Int64.Type}
+        }
+    ),
+    
+    ClassificationRulesUpper = Table.TransformColumns(ClassificationRules,
+        {{"Keyword", Text.Upper, type text}}
+    ),
+    
+    ClassificationRulesSorted = Table.Sort(ClassificationRulesUpper, {{"Priority", Order.Ascending}}),
+    
+    //==================================================================================================================
+    // CLASSIFICATION FUNCTION (WITH COUNTRY FILTER AND PRIORITY)
+    //==================================================================================================================
+    
+    fnClassifyTransaction = (textToClassify as text, country as text) as text =>
+        let
+            TextUpper = Text.Upper(textToClassify),
+            
+            ApplicableRules = Table.SelectRows(ClassificationRulesSorted, 
+                each fnCountryMatches([Country], country)
+            ),
+            
+            MatchingCategory = 
+                let
+                    CountrySpecificRules = Table.SelectRows(ApplicableRules, 
+                        each Text.Upper([Country]) = Text.Upper(country)
+                    ),
+                    
+                    MultiCountryRules = Table.SelectRows(ApplicableRules, 
+                        each Text.Contains([Country], ",")
+                    ),
+                    
+                    GlobalRules = Table.SelectRows(ApplicableRules, 
+                        each Text.Upper([Country]) = "ALL"
+                    ),
+                    
+                    FindMatch = (rules as table) as nullable text =>
+                        let
+                            MatchingRows = Table.SelectRows(rules, 
+                                each Text.Contains(TextUpper, [Keyword])
+                            ),
+                            
+                            FirstMatch = if Table. RowCount(MatchingRows) > 0 
+                                        then MatchingRows{0}[Category] 
+                                        else null
+                        in
+                            FirstMatch,
+                    
+                    CountryMatch = FindMatch(CountrySpecificRules),
+                    MultiCountryMatch = FindMatch(MultiCountryRules),
+                    GlobalMatch = FindMatch(GlobalRules),
+                    
+                    FinalCategory = if CountryMatch <> null then CountryMatch 
+                                    else if MultiCountryMatch <> null then MultiCountryMatch 
+                                    else if GlobalMatch <> null then GlobalMatch 
+                                    else "Others"
+                in
+                    FinalCategory
+        in
+            MatchingCategory,
+    
+    //==================================================================================================================
+    // DATA FOLDER PATH
+    //==================================================================================================================
+    
+    DataFolderPath = BasePath & "Data Repository\Actuals\3.  Cash Taxes",
+    
+    //==================================================================================================================
+    // LOAD FILES FROM FOLDER
+    //==================================================================================================================
+    
+    SourceFiles = Folder.Files(DataFolderPath),
+    #"Filtered Hidden Files" = Table.SelectRows(SourceFiles, 
+        each [Attributes]? [Hidden]?  <> true
+    ),
+    
+    //==================================================================================================================
+    // TRANSFORM FILES
+    //==================================================================================================================
+    
+    #"Invoked Transform Function" = Table.AddColumn(#"Filtered Hidden Files", "Transform File", 
+        each #"Transform File"([Content])
+    ),
+    #"Renamed Source Column" = Table.RenameColumns(#"Invoked Transform Function", {{"Name", "Source. Name"}}),
+    #"Selected Relevant Columns" = Table.SelectColumns(#"Renamed Source Column", {"Source.Name", "Transform File"}),
+    #"Expanded Transformed Data" = Table. ExpandTableColumn(
+        #"Selected Relevant Columns", 
+        "Transform File", 
+        Table. ColumnNames(#"Transform File"(#"Sample File"))
+    ),
+    
+    //==================================================================================================================
+    // DATA TYPE TRANSFORMATIONS
+    //==================================================================================================================
+    
+    #"Changed Initial Types" = Table.TransformColumnTypes(#"Expanded Transformed Data", 
+        {
+            {"Source.Name", type text}, 
+            {"Company Code", type text}, 
+            {"Account", type text}, 
+            {"Document Type", type text}, 
+            {"Document Date", type date},
+            {"Posting Date", type date},
+            {"Year/month", type date},
+            {"Text", type text},
+            {"Amount in local currency", type number}
+        }
+    ),
+    
+    //==================================================================================================================
+    // FILTER UNWANTED DOCUMENT TYPES
+    //==================================================================================================================
+    
+    #"Filtered Document Types" = Table.SelectRows(#"Changed Initial Types", 
+        each not List.Contains({"AB", "MA", "MB"}, [Document Type])
+    ),
+    
+    //==================================================================================================================
+    // CLEAN UP COLUMNS
+    //==================================================================================================================
+    
+    #"Removed Source Name" = Table.RemoveColumns(#"Filtered Document Types", {"Source.Name"}),
+    #"Removed Date Columns" = Table.RemoveColumns(#"Removed Source Name", {"Document Date", "Posting Date"}),
+    
+    //==================================================================================================================
+    // ENRICH WITH COUNTRY DATA (BEFORE CLASSIFICATION)
+    //==================================================================================================================
+    
+    #"Merged with Countries" = Table. NestedJoin(
+        #"Removed Date Columns", 
+        {"Company Code"}, 
+        Countries_SAP, 
+        {"Entity"}, 
+        "Countries_SAP", 
+        JoinKind. LeftOuter
+    ),
+    #"Expanded Country Column" = Table.ExpandTableColumn(
+        #"Merged with Countries", 
+        "Countries_SAP", 
+        {"Country"}, 
+        {"Country"}
+    ),
+    
+    //==================================================================================================================
+    // ADD BUSINESS LOGIC - Description categorization
+    //==================================================================================================================
+    
+    #"Added Description Category" = Table.AddColumn(#"Expanded Country Column", "Description", 
+        each fnClassifyTransaction([Text], [Country]),
+        type text
+    ),
+    
+    //==================================================================================================================
+    // RENAME AND PREPARE FOR FX CALCULATION
+    //==================================================================================================================
+    
+    #"Renamed Date Column" = Table.RenameColumns(#"Added Description Category", {{"Year/month", "Key Date"}}),
+    
+    //==================================================================================================================
+    // CREATE FX LOOKUP KEY
+    //==================================================================================================================
+    
+    #"Added FX Lookup Key" = Table.AddColumn(#"Renamed Date Column", "ID", 
+        each [Country] & 
+             Date. MonthName([Key Date]) & 
+             Number.ToText(Date.Year([Key Date])) & 
+             "Plrate" & 
+             "ACT"
+    ),
+    
+    //==================================================================================================================
+    // MERGE WITH FX RATES
+    //==================================================================================================================
+    
+    #"Merged with FX Rates" = Table. NestedJoin(
+        #"Added FX Lookup Key", 
+        {"ID"}, 
+        #"Foreign_Exchange [Master]", 
+        {"ID"}, 
+        "Foreign_Exchange [Master]", 
+        JoinKind.LeftOuter
+    ),
+    #"Expanded FX Value" = Table.ExpandTableColumn(
+        #"Merged with FX Rates", 
+        "Foreign_Exchange [Master]", 
+        {"Value"}, 
+        {"FX Rate"}
+    ),
+    
+    //==================================================================================================================
+    // CALCULATE USD VALUE
+    //==================================================================================================================
+    
+    #"Renamed Amount Column" = Table.RenameColumns(#"Expanded FX Value", 
+        {{"Amount in local currency", "Amount LC"}}
+    ),
+    #"Added USD Value" = Table.AddColumn(#"Renamed Amount Column", "Value", 
+        each ([Amount LC] / [FX Rate]) / 1000000
+    ),
+    #"Set Value Type" = Table.TransformColumnTypes(#"Added USD Value", {{"Value", type number}}),
+    
+    //==================================================================================================================
+    // REMOVE TEMPORARY COLUMNS (before aggregation)
+    //==================================================================================================================
+    
+    #"Removed Temporary Columns" = Table. RemoveColumns(#"Set Value Type", {"ID", "FX Rate", "Amount LC"}),
+    
+    //==================================================================================================================
+    // ✅ AGGREGATION FOR EXCEL COLLABORATION - TAX TEAM
+    //==================================================================================================================
+    
+    #"Grouped by Country Date Description" = Table.Group(
+        #"Removed Temporary Columns", 
+        {
+            "Country", 
+            "Key Date", 
+            "Description"
+        }, 
+        {
+            {
+                "Value (USD MM)", 
+                each List.Sum([Value]), 
+                type nullable number
+            },
+            {
+                "Transaction Count", 
+                each Table. RowCount(_), 
+                Int64.Type
+            }
+        }
+    ),
+    
+    //==================================================================================================================
+    // FORMAT FOR EXCEL USABILITY
+    //==================================================================================================================
+    
+    // Añadir columnas útiles para análisis
+    #"Added Year" = Table.AddColumn(#"Grouped by Country Date Description", "Year", 
+        each Date.Year([Key Date]), 
+        Int64.Type
+    ),
+    
+    #"Added Month Number" = Table.AddColumn(#"Added Year", "Month", 
+        each Date.Month([Key Date]), 
+        Int64.Type
+    ),
+    
+    #"Added Month Name" = Table.AddColumn(#"Added Month Number", "Month Name", 
+        each Date. MonthName([Key Date]), 
+        type text
+    ),
+    
+    #"Added Quarter" = Table.AddColumn(#"Added Month Name", "Quarter", 
+        each "Q" & Text.From(Date.QuarterOfYear([Key Date])), 
+        type text
+    ),
+    
+    //==================================================================================================================
+    // REORDER COLUMNS FOR EXCEL
+    //==================================================================================================================
+    
+    #"Reordered for Excel" = Table.ReorderColumns(#"Added Quarter",
+        {
+            "Country", 
+            "Key Date", 
+            "Year", 
+            "Quarter",
+            "Month", 
+            "Month Name",
+            "Description", 
+            "Value (USD MM)", 
+            "Transaction Count"
+        }
+    ),
+    
+    //==================================================================================================================
+    // SORT FOR EASY NAVIGATION
+    //==================================================================================================================
+    
+    #"Sorted" = Table.Sort(#"Reordered for Excel",
+        {
+            {"Country", Order.Ascending},
+            {"Year", Order.Descending},
+            {"Month", Order.Ascending},
+            {"Description", Order.Ascending}
+        }
+    ),
+    
+    //==================================================================================================================
+    // FINAL RESULT FOR EXCEL
+    //==================================================================================================================
+    
+    FinalForExcel = #"Sorted"
+in
+    FinalForExcel
