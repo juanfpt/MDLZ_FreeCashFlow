@@ -5,7 +5,7 @@ let
     fnGetUsername = () =>
         let
             Source = Folder.Contents("C:\Users\"),
-            #"Expanded Attributes" = Table. ExpandRecordColumn(Source, "Attributes", 
+            #"Expanded Attributes" = Table.ExpandRecordColumn(Source, "Attributes", 
                 {"Hidden", "Directory", "ChangeTime"}, 
                 {"Hidden", "Directory", "ChangeTime"}
             ),
@@ -30,7 +30,7 @@ let
     // ✅ REFERENCE EXTERNAL QUERY + BUFFER-----------------------------------------------------------------------------
 
     
-    ClassificationRulesBuffered = Table.Buffer(Tax_Classification_Rules),
+    ClassificationRulesBuffered = Table.Buffer(TaxRules),
     
 
     // DATA FOLDER PATH-------------------------------------------------------------------------------------------------
@@ -58,7 +58,7 @@ let
     #"Expanded Transformed Data" = Table.ExpandTableColumn(
         #"Selected Relevant Columns", 
         "Transform File", 
-        Table. ColumnNames(#"Transform File"(#"Sample File"))
+        Table.ColumnNames(#"Transform File"(#"Sample File"))
     ),
     
     // DATA TYPE TRANSFORMATIONS----------------------------------------------------------------------------------------
@@ -91,13 +91,13 @@ let
 
     // ENRICH WITH COUNTRY DATA (BEFORE CLASSIFICATION)-----------------------------------------------------------------
     
-    #"Merged with Countries" = Table. NestedJoin(
+    #"Merged with Countries" = Table.NestedJoin(
         #"Removed Date Columns", 
         {"Company Code"}, 
         Countries_SAP, 
         {"Entity"}, 
         "Countries_SAP", 
-        JoinKind. LeftOuter
+        JoinKind.LeftOuter
     ),
     #"Expanded Country Column" = Table.ExpandTableColumn(
         #"Merged with Countries", 
@@ -120,7 +120,7 @@ let
                         let
                             RuleCountryUpper = [Country],
                             IsAll = RuleCountryUpper = "ALL",
-                            CountryList = List.Transform(Text.Split(RuleCountryUpper, ","), each Text. Trim(_)),
+                            CountryList = List.Transform(Text.Split(RuleCountryUpper, ","), each Text.Trim(_)),
                             IsInList = List.Contains(CountryList, CountryUpper)
                         in
                             IsAll or IsInList
@@ -145,7 +145,7 @@ let
                 CountryMatchRows = Table.SelectRows(CountrySpecificRules, 
                     each Text.Contains(TextUpper, [Keyword])
                 ),
-                CountryMatch = if Table. RowCount(CountryMatchRows) > 0 
+                CountryMatch = if Table.RowCount(CountryMatchRows) > 0 
                               then CountryMatchRows{0}[Category] 
                               else null,
                 
@@ -183,7 +183,7 @@ let
     
     #"Added FX Lookup Key" = Table.AddColumn(#"Renamed Date Column", "ID", 
         each [Country] & 
-             Date. MonthName([Key Date]) & 
+             Date.MonthName([Key Date]) & 
              Number.ToText(Date.Year([Key Date])) & 
              "Plrate" & 
              "ACT"
@@ -197,7 +197,7 @@ let
         #"Foreign_Exchange [Master]", 
         {"ID"}, 
         "Foreign_Exchange [Master]", 
-        JoinKind. LeftOuter
+        JoinKind.LeftOuter
     ),
     #"Expanded FX Value" = Table.ExpandTableColumn(
         #"Merged with FX Rates", 
