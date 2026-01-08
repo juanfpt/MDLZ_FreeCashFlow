@@ -64,8 +64,11 @@ let
     
     ClassificationRulesSorted = Table.Sort(ClassificationRulesUpper, {{"Priority", Order.Ascending}}),
     
+    // Buffer to prevent Formula.Firewall errors
+    ClassificationRulesBuffered = Table.Buffer(ClassificationRulesSorted),
+    
 
-    // CLASSIFICATION FUNCTION (WITH COUNTRY FILTER AND PRIORITY)----------------------------------------------------
+    // CLASSIFICATION FUNCTION (WITH COUNTRY FILTER AND PRIORITY)------------------------------------------------------
 
     
     fnClassifyTransaction = (textToClassify as text, country as text, classificationRules as table) as text =>
@@ -122,7 +125,7 @@ let
     DataFolderPath = BasePath & "Data Repository\Actuals\3. Cash Taxes",
     
 
-    // LOAD FILES FROM FOLDER
+    // LOAD FILES FROM FOLDER------------------------------------------------------------------------------------------
 
     
     SourceFiles = Folder.Files(DataFolderPath),
@@ -190,20 +193,28 @@ let
     ),
     
     
+    // ADD BUSINESS LOGIC - Description categorization using classification table + country + priority------------------
+    
     #"Added Description Category" = Table.AddColumn(#"Expanded Country Column", "Description", 
-        each fnClassifyTransaction([Text], [Country]),
+        each fnClassifyTransaction([Text], [Country], ClassificationRulesBuffered),
         type text
     ),
     
+    // RENAME AND PREPARE FOR FX CALCULATION---------------------------------------------------------------------------
+    
     #"Renamed Date Column" = Table.RenameColumns(#"Added Description Category", {{"Year/month", "Key Date"}}),
     
-    #"Added FX Lookup Key" = Table.AddColumn(#"Renamed Date Column", "ID", 
+    // CREATE FX LOOKUP KEY---------------------------------------------------------------------------------------------
+    
+    #"Added FX Lookup Key" = Table.AddColumn(#"Renamed Date Column", "ID",
         each [Country] & 
              Date.MonthName([Key Date]) & 
              Number.ToText(Date.Year([Key Date])) & 
              "Plrate" & 
              "ACT"
     ),
+    
+    // MERGE WITH FX RATES----------------------------------------------------------------------------------------------
     
     #"Merged with FX Rates" = Table.NestedJoin(
         #"Added FX Lookup Key", 
@@ -220,7 +231,9 @@ let
         {"FX Rate"}
     ),
     
-    #"Renamed Amount Column" = Table.RenameColumns(#"Expanded FX Value", 
+    // CALCULATE USD VALUE----------------------------------------------------------------------------------------------
+    
+    #"Renamed Amount Column" = Table.RenameColumns(#"Expanded FX Value",
         {{"Amount in local currency", "Amount LC"}}
     ),
     #"Added USD Value" = Table.AddColumn(#"Renamed Amount Column", "Value", 
@@ -228,7 +241,11 @@ let
     ),
     #"Set Value Type" = Table.TransformColumnTypes(#"Added USD Value", {{"Value", type number}}),
     
+    // FINAL CLEANUP----------------------------------------------------------------------------------------------------
+    
     #"Removed Temporary Columns" = Table.RemoveColumns(#"Set Value Type", {"ID", "FX Rate"}),
+    
+    // RESULT-----------------------------------------------------------------------------------------------------------
     
     Result = #"Removed Temporary Columns"
 in
