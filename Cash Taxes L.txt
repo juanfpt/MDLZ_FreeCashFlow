@@ -1,11 +1,10 @@
 let
-    //==================================================================================================================
-    // HELPER FUNCTIONS
-    //==================================================================================================================
+
+    // HELPER FUNCTIONS-------------------------------------------------------------------------------------------------
     
     fnGetUsername = () =>
         let
-            Source = Folder. Contents("C:\Users\"),
+            Source = Folder.Contents("C:\Users\"),
             #"Expanded Attributes" = Table.ExpandRecordColumn(Source, "Attributes", 
                 {"Hidden", "Directory", "ChangeTime"}, 
                 {"Hidden", "Directory", "ChangeTime"}
@@ -33,19 +32,16 @@ let
         in
             Matches,
     
-    //==================================================================================================================
-    // CONFIGURATION
-    //==================================================================================================================
+    // CONFIGURATION----------------------------------------------------------------------------------------------------
     
     Username = fnGetUsername(),
     BasePath = fnGetBasePath(Username),
     
-    // Ruta del archivo de configuración de clasificación
-    ClassificationFilePath = BasePath & "Data Repository\Configuration\Tax_Classification.xlsx",
-    
-    //==================================================================================================================
-    // LOAD CLASSIFICATION RULES FROM EXTERNAL EXCEL FILE
-    //==================================================================================================================
+    ClassificationFilePath = BasePath & "Data Repository\Actuals\Support\Classifier.xlsx",
+
+
+    // LOAD CLASSIFICATION RULES FROM EXTERNAL EXCEL FILE--------------------------------------------------------------
+
     
     ClassificationWorkbook = Excel.Workbook(File.Contents(ClassificationFilePath), null, true),
     ClassificationSheet = ClassificationWorkbook{[Item="TaxClassification",Kind="Table"]}[Data],
@@ -59,7 +55,6 @@ let
         }
     ),
     
-    // Convertir keywords a mayúsculas para búsqueda case-insensitive
     ClassificationRulesUpper = Table.TransformColumns(ClassificationRules,
         {
             {"Keyword", Text.Upper, type text},
@@ -67,38 +62,33 @@ let
         }
     ),
     
-    // Ordenar por prioridad (menor número = mayor prioridad)
     ClassificationRulesSorted = Table.Sort(ClassificationRulesUpper, {{"Priority", Order.Ascending}}),
     
-    //==================================================================================================================
-    // CLASSIFICATION FUNCTION (WITH COUNTRY FILTER AND PRIORITY)
-    //==================================================================================================================
+
+    // CLASSIFICATION FUNCTION (WITH COUNTRY FILTER AND PRIORITY)----------------------------------------------------
+
     
-    fnClassifyTransaction = (textToClassify as text, country as text) as text =>
+    fnClassifyTransaction = (textToClassify as text, country as text, classificationRules as table) as text =>
         let
             TextUpper = Text.Upper(textToClassify),
             
-            // Filtrar reglas aplicables para este país usando fnCountryMatches
-            ApplicableRules = Table.SelectRows(ClassificationRulesSorted, 
+            ApplicableRules = Table.SelectRows(classificationRules, 
                 each fnCountryMatches([Country], country)
             ),
             
-            // Nivel 1: Reglas específicas del país (match exacto)
             CountrySpecificRules = Table.SelectRows(ApplicableRules, 
                 each Text.Upper([Country]) = Text.Upper(country)
             ),
             
-            // Nivel 2: Reglas multi-país (contiene comas)
             MultiCountryRules = Table.SelectRows(ApplicableRules, 
                 each Text.Contains([Country], ",")
             ),
             
-            // Nivel 3: Reglas globales (ALL)
             GlobalRules = Table.SelectRows(ApplicableRules, 
                 each Text.Upper([Country]) = "ALL"
             ),
             
-            // Función que busca coincidencia en una tabla de reglas (respeta el orden Priority)
+            // Match function by priority
             FindMatch = (rules as table) as nullable text =>
                 let
                     // Buscar la primera keyword que coincida (orden por Priority)
@@ -125,43 +115,40 @@ let
         in
             FinalCategory,
     
-    //==================================================================================================================
-    // DATA FOLDER PATH
-    //==================================================================================================================
+
+    // DATA FOLDER PATH-------------------------------------------------------------------------------------------------
+
     
     DataFolderPath = BasePath & "Data Repository\Actuals\3. Cash Taxes",
     
-    //==================================================================================================================
+
     // LOAD FILES FROM FOLDER
-    //==================================================================================================================
+
     
     SourceFiles = Folder.Files(DataFolderPath),
     #"Filtered Hidden Files" = Table.SelectRows(SourceFiles, 
         each [Attributes]? [Hidden]?  <> true
     ),
     
-    //==================================================================================================================
-    // TRANSFORM FILES
-    //==================================================================================================================
+    // TRANSFORM FILES-------------------------------------------------------------------------------------------------
+
     
     #"Invoked Transform Function" = Table.AddColumn(#"Filtered Hidden Files", "Transform File", 
         each #"Transform File"([Content])
     ),
-    #"Renamed Source Column" = Table.RenameColumns(#"Invoked Transform Function", {{"Name", "Source. Name"}}),
+    #"Renamed Source Column" = Table.RenameColumns(#"Invoked Transform Function", {{"Name", "Source.Name"}}),
     #"Selected Relevant Columns" = Table.SelectColumns(#"Renamed Source Column", {"Source.Name", "Transform File"}),
-    #"Expanded Transformed Data" = Table. ExpandTableColumn(
+    #"Expanded Transformed Data" = Table.ExpandTableColumn(
         #"Selected Relevant Columns", 
         "Transform File", 
-        Table. ColumnNames(#"Transform File"(#"Sample File"))
+        Table.ColumnNames(#"Transform File"(#"Sample File"))
     ),
     
-    //==================================================================================================================
-    // DATA TYPE TRANSFORMATIONS
-    //==================================================================================================================
+    // DATA TYPE TRANSFORMATIONS----------------------------------------------------------------------------------------
     
     #"Changed Initial Types" = Table.TransformColumnTypes(#"Expanded Transformed Data", 
         {
-            {"Source. Name", type text}, 
+            {"Source.Name", type text}, 
             {"Company Code", type text}, 
             {"Account", type text}, 
             {"Document Type", type text}, 
@@ -173,32 +160,27 @@ let
         }
     ),
     
-    //==================================================================================================================
-    // FILTER UNWANTED DOCUMENT TYPES
-    //==================================================================================================================
+    // FILTER UNWANTED DOCUMENT TYPES-----------------------------------------------------------------------------------
     
     #"Filtered Document Types" = Table.SelectRows(#"Changed Initial Types", 
         each not List.Contains({"AB", "MA", "MB"}, [Document Type])
     ),
     
-    //==================================================================================================================
-    // CLEAN UP COLUMNS
-    //==================================================================================================================
+    // CLEAN UP COLUMNS------------------------------------------------------------------------------------------------
     
     #"Removed Source Name" = Table.RemoveColumns(#"Filtered Document Types", {"Source.Name"}),
     #"Removed Date Columns" = Table.RemoveColumns(#"Removed Source Name", {"Document Date", "Posting Date"}),
     
-    //==================================================================================================================
-    // ENRICH WITH COUNTRY DATA (BEFORE CLASSIFICATION)
-    //==================================================================================================================
+
+    // ENRICH WITH COUNTRY DATA (BEFORE CLASSIFICATION)----------------------------------------------------------------
     
-    #"Merged with Countries" = Table. NestedJoin(
+    #"Merged with Countries" = Table.NestedJoin(
         #"Removed Date Columns", 
         {"Company Code"}, 
         Countries_SAP, 
         {"Entity"}, 
         "Countries_SAP", 
-        JoinKind. LeftOuter
+        JoinKind.LeftOuter
     ),
     #"Expanded Country Column" = Table.ExpandTableColumn(
         #"Merged with Countries", 
@@ -207,44 +189,29 @@ let
         {"Country"}
     ),
     
-    //==================================================================================================================
-    // ADD BUSINESS LOGIC - Description categorization using classification table + country + priority
-    //==================================================================================================================
     
     #"Added Description Category" = Table.AddColumn(#"Expanded Country Column", "Description", 
         each fnClassifyTransaction([Text], [Country]),
         type text
     ),
     
-    //==================================================================================================================
-    // RENAME AND PREPARE FOR FX CALCULATION
-    //==================================================================================================================
-    
     #"Renamed Date Column" = Table.RenameColumns(#"Added Description Category", {{"Year/month", "Key Date"}}),
-    
-    //==================================================================================================================
-    // CREATE FX LOOKUP KEY
-    //==================================================================================================================
     
     #"Added FX Lookup Key" = Table.AddColumn(#"Renamed Date Column", "ID", 
         each [Country] & 
-             Date. MonthName([Key Date]) & 
+             Date.MonthName([Key Date]) & 
              Number.ToText(Date.Year([Key Date])) & 
              "Plrate" & 
              "ACT"
     ),
     
-    //==================================================================================================================
-    // MERGE WITH FX RATES
-    //==================================================================================================================
-    
-    #"Merged with FX Rates" = Table. NestedJoin(
+    #"Merged with FX Rates" = Table.NestedJoin(
         #"Added FX Lookup Key", 
         {"ID"}, 
         #"Foreign_Exchange [Master]", 
         {"ID"}, 
         "Foreign_Exchange [Master]", 
-        JoinKind. LeftOuter
+        JoinKind.LeftOuter
     ),
     #"Expanded FX Value" = Table.ExpandTableColumn(
         #"Merged with FX Rates", 
@@ -252,10 +219,6 @@ let
         {"Value"}, 
         {"FX Rate"}
     ),
-    
-    //==================================================================================================================
-    // CALCULATE USD VALUE
-    //==================================================================================================================
     
     #"Renamed Amount Column" = Table.RenameColumns(#"Expanded FX Value", 
         {{"Amount in local currency", "Amount LC"}}
@@ -265,16 +228,9 @@ let
     ),
     #"Set Value Type" = Table.TransformColumnTypes(#"Added USD Value", {{"Value", type number}}),
     
-    //==================================================================================================================
-    // FINAL CLEANUP
-    //==================================================================================================================
-    
     #"Removed Temporary Columns" = Table.RemoveColumns(#"Set Value Type", {"ID", "FX Rate"}),
-    
-    //==================================================================================================================
-    // RESULT
-    //==================================================================================================================
     
     Result = #"Removed Temporary Columns"
 in
     Result
+
