@@ -5,7 +5,7 @@ let
     fnGetUsername = () =>
         let
             Source = Folder.Contents("C:\Users\"),
-            #"Expanded Attributes" = Table.ExpandRecordColumn(Source, "Attributes", 
+            #"Expanded Attributes" = Table. ExpandRecordColumn(Source, "Attributes", 
                 {"Hidden", "Directory", "ChangeTime"}, 
                 {"Hidden", "Directory", "ChangeTime"}
             ),
@@ -21,16 +21,7 @@ let
     fnGetBasePath = (username as text) as text =>
         "C:\Users\" & username & "\MDLZ\Cash Flow Planning WACAM - Documents\Cash Flow Mensual\FCF Internal Report\",
     
-    fnCountryMatches = (ruleCountry as text, actualCountry as text) as logical =>
-        let
-            RuleCountryUpper = Text.Upper(ruleCountry),
-            ActualCountryUpper = Text.Upper(actualCountry),
-            IsAll = RuleCountryUpper = "ALL",
-            CountryList = List.Transform(Text.Split(RuleCountryUpper, ","), each Text.Trim(_)),
-            IsInList = List.Contains(CountryList, ActualCountryUpper),
-            Matches = IsAll or IsInList
-        in
-            Matches,
+    // ❌ ELIMINAR fnCountryMatches - ya no la usaremos
     
     // CONFIGURATION----------------------------------------------------------------------------------------------------
     
@@ -64,23 +55,31 @@ let
     
     ClassificationRulesSorted = Table.Sort(ClassificationRulesUpper, {{"Priority", Order.Ascending}}),
     
-    // Buffer to prevent Formula.Firewall errors
     ClassificationRulesBuffered = Table.Buffer(ClassificationRulesSorted),
     
 
-    // CLASSIFICATION FUNCTION (WITH COUNTRY FILTER AND PRIORITY)------------------------------------------------------
+    // ✅ CLASSIFICATION FUNCTION - REESCRITA SIN fnCountryMatches------------------------------------------------------
 
     
     fnClassifyTransaction = (textToClassify as text, country as text, classificationRules as table) as text =>
         let
             TextUpper = Text.Upper(textToClassify),
+            CountryUpper = Text.Upper(country),
             
+            // ✅ Lógica de fnCountryMatches INLINE (dentro de la función)
             ApplicableRules = Table.SelectRows(classificationRules, 
-                each fnCountryMatches([Country], country)
+                each 
+                    let
+                        RuleCountryUpper = Text. Upper([Country]),
+                        IsAll = RuleCountryUpper = "ALL",
+                        CountryList = List.Transform(Text.Split(RuleCountryUpper, ","), each Text.Trim(_)),
+                        IsInList = List.Contains(CountryList, CountryUpper)
+                    in
+                        IsAll or IsInList
             ),
             
             CountrySpecificRules = Table.SelectRows(ApplicableRules, 
-                each Text.Upper([Country]) = Text.Upper(country)
+                each [Country] = CountryUpper
             ),
             
             MultiCountryRules = Table.SelectRows(ApplicableRules, 
@@ -88,25 +87,23 @@ let
             ),
             
             GlobalRules = Table.SelectRows(ApplicableRules, 
-                each Text.Upper([Country]) = "ALL"
+                each [Country] = "ALL"
             ),
             
             // Match function by priority
             FindMatch = (rules as table) as nullable text =>
                 let
-                    // Buscar la primera keyword que coincida (orden por Priority)
                     MatchingRows = Table.SelectRows(rules, 
                         each Text.Contains(TextUpper, [Keyword])
                     ),
                     
-                    // Retornar la categoría de la primera coincidencia (mayor prioridad)
-                    FirstMatch = if Table.RowCount(MatchingRows) > 0 
+                    FirstMatch = if Table. RowCount(MatchingRows) > 0 
                                 then MatchingRows{0}[Category] 
                                 else null
                 in
                     FirstMatch,
             
-            // Buscar en orden: país específico > multi-país > global
+            // Buscar en orden:  país específico > multi-país > global
             CountryMatch = FindMatch(CountrySpecificRules),
             MultiCountryMatch = FindMatch(MultiCountryRules),
             GlobalMatch = FindMatch(GlobalRules),
@@ -122,7 +119,7 @@ let
     // DATA FOLDER PATH-------------------------------------------------------------------------------------------------
 
     
-    DataFolderPath = BasePath & "Data Repository\Actuals\3. Cash Taxes",
+    DataFolderPath = BasePath & "Data Repository\Actuals\3.  Cash Taxes",
     
 
     // LOAD FILES FROM FOLDER------------------------------------------------------------------------------------------
@@ -139,7 +136,7 @@ let
     #"Invoked Transform Function" = Table.AddColumn(#"Filtered Hidden Files", "Transform File", 
         each #"Transform File"([Content])
     ),
-    #"Renamed Source Column" = Table.RenameColumns(#"Invoked Transform Function", {{"Name", "Source.Name"}}),
+    #"Renamed Source Column" = Table.RenameColumns(#"Invoked Transform Function", {{"Name", "Source. Name"}}),
     #"Selected Relevant Columns" = Table.SelectColumns(#"Renamed Source Column", {"Source.Name", "Transform File"}),
     #"Expanded Transformed Data" = Table.ExpandTableColumn(
         #"Selected Relevant Columns", 
@@ -169,21 +166,21 @@ let
         each not List.Contains({"AB", "MA", "MB"}, [Document Type])
     ),
     
-    // CLEAN UP COLUMNS------------------------------------------------------------------------------------------------
+    // CLEAN UP COLUMNS-------------------------------------------------------------------------------------------------
     
     #"Removed Source Name" = Table.RemoveColumns(#"Filtered Document Types", {"Source.Name"}),
     #"Removed Date Columns" = Table.RemoveColumns(#"Removed Source Name", {"Document Date", "Posting Date"}),
     
 
-    // ENRICH WITH COUNTRY DATA (BEFORE CLASSIFICATION)----------------------------------------------------------------
+    // ENRICH WITH COUNTRY DATA (BEFORE CLASSIFICATION)-----------------------------------------------------------------
     
-    #"Merged with Countries" = Table.NestedJoin(
+    #"Merged with Countries" = Table. NestedJoin(
         #"Removed Date Columns", 
         {"Company Code"}, 
         Countries_SAP, 
         {"Entity"}, 
         "Countries_SAP", 
-        JoinKind.LeftOuter
+        JoinKind. LeftOuter
     ),
     #"Expanded Country Column" = Table.ExpandTableColumn(
         #"Merged with Countries", 
@@ -191,7 +188,6 @@ let
         {"Country"}, 
         {"Country"}
     ),
-    
     
     // ADD BUSINESS LOGIC - Description categorization using classification table + country + priority------------------
     
@@ -208,7 +204,7 @@ let
     
     #"Added FX Lookup Key" = Table.AddColumn(#"Renamed Date Column", "ID", 
         each [Country] & 
-             Date.MonthName([Key Date]) & 
+             Date. MonthName([Key Date]) & 
              Number.ToText(Date.Year([Key Date])) & 
              "Plrate" & 
              "ACT"
@@ -222,7 +218,7 @@ let
         #"Foreign_Exchange [Master]", 
         {"ID"}, 
         "Foreign_Exchange [Master]", 
-        JoinKind.LeftOuter
+        JoinKind. LeftOuter
     ),
     #"Expanded FX Value" = Table.ExpandTableColumn(
         #"Merged with FX Rates", 
@@ -250,4 +246,5 @@ let
     Result = #"Removed Temporary Columns"
 in
     Result
+
 
