@@ -2,7 +2,7 @@ let
     fnGetUsername = () =>
         let
             Source = Folder.Contents("C:\Users\"),
-            #"Expanded Attributes" = Table. ExpandRecordColumn(Source, "Attributes", 
+            #"Expanded Attributes" = Table.ExpandRecordColumn(Source, "Attributes", 
                 {"Hidden", "Directory", "ChangeTime"}, 
                 {"Hidden", "Directory", "ChangeTime"}
             ),
@@ -20,7 +20,7 @@ let
     
     Username = fnGetUsername(),
     BasePath = fnGetBasePath(Username),
-    ClassificationFilePath = BasePath & "Data Repository\Actuals\Support\Classifier. xlsx",
+    ClassificationFilePath = BasePath & "Data Repository\Actuals\Support\Classifier.xlsx",
     
     Workbook = Excel.Workbook(File.Contents(ClassificationFilePath), null, true),
     Sheet = Workbook{[Item="TaxClassification",Kind="Table"]}[Data],

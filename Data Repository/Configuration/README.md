@@ -3,7 +3,28 @@
 This file contains the classification rules for tax transactions in the Cash Taxes L Power Query script.
 
 ## File Location
-`Data Repository\Configuration\Tax_Classification.xlsx`
+The `TaxRules` Power Query expects the classification file at:
+`Data Repository\Actuals\Support\Classifier.xlsx`
+
+(Note: A copy may also exist in `Data Repository\Configuration\Tax_Classification.xlsx` for reference)
+
+## Power Query Architecture
+
+The classification system uses a **two-query architecture** to avoid Formula.Firewall errors:
+
+### Query 1: TaxRules (reference-only)
+- Loads classification rules from the Excel file
+- Transforms column types and converts to uppercase
+- Sorts by Priority (ascending)
+- **Enable load:** ❌ DISABLED (reference-only query)
+
+### Query 2: Cash Taxes L (main query)
+- References `TaxRules` query with `Table.Buffer()` for performance
+- Performs classification inline (no custom functions)
+- Processes tax transaction files from the Cash Taxes folder
+- **Enable load:** ✅ ENABLED
+
+This architecture prevents cross-source data combination issues that trigger Formula.Firewall errors.
 
 ## Table Structure
 The Excel file contains a table named `TaxClassification` with the following columns:
