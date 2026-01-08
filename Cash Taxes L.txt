@@ -26,46 +26,17 @@ let
     Username = fnGetUsername(),
     BasePath = fnGetBasePath(Username),
     
-    ClassificationFilePath = BasePath & "Data Repository\Actuals\Support\Classifier.xlsx",
 
-
-    // ✅ LOAD CLASSIFICATION RULES - CON BUFFER INMEDIATO-------------------------------------------------------------
+    // ✅ REFERENCE EXTERNAL QUERY + BUFFER-----------------------------------------------------------------------------
 
     
-    ClassificationRulesBuffered = 
-        let
-            // Cargar TODO en un solo let para que Buffer capture todo el proceso
-            Workbook = Excel.Workbook(File.Contents(ClassificationFilePath), null, true),
-            Sheet = Workbook{[Item="TaxClassification",Kind="Table"]}[Data],
-            
-            Typed = Table.TransformColumnTypes(Sheet,
-                {
-                    {"Country", type text},
-                    {"Keyword", type text},
-                    {"Category", type text},
-                    {"Priority", Int64.Type}
-                }
-            ),
-            
-            UpperCased = Table.TransformColumns(Typed,
-                {
-                    {"Keyword", Text.Upper, type text},
-                    {"Country", Text.Upper, type text}
-                }
-            ),
-            
-            Sorted = Table.Sort(UpperCased, {{"Priority", Order.Ascending}}),
-            
-            // Buffer TODO el resultado
-            Buffered = Table.Buffer(Sorted)
-        in
-            Buffered,
+    ClassificationRulesBuffered = Table.Buffer(Tax_Classification_Rules),
     
 
     // DATA FOLDER PATH-------------------------------------------------------------------------------------------------
 
     
-    DataFolderPath = BasePath & "Data Repository\Actuals\3.   Cash Taxes",
+    DataFolderPath = BasePath & "Data Repository\Actuals\3. Cash Taxes",
     
 
     // LOAD FILES FROM FOLDER------------------------------------------------------------------------------------------
@@ -73,7 +44,7 @@ let
     
     SourceFiles = Folder.Files(DataFolderPath),
     #"Filtered Hidden Files" = Table.SelectRows(SourceFiles, 
-        each [Attributes]?[Hidden]?  <> true
+        each [Attributes]? [Hidden]?  <> true
     ),
     
     // TRANSFORM FILES-------------------------------------------------------------------------------------------------
@@ -141,7 +112,7 @@ let
         each 
             let
                 TextUpper = Text.Upper([Text]),
-                CountryUpper = Text. Upper([Country]),
+                CountryUpper = Text.Upper([Country]),
                 
                 // Filtrar reglas aplicables al país
                 ApplicableRules = Table.SelectRows(ClassificationRulesBuffered, 
@@ -149,7 +120,7 @@ let
                         let
                             RuleCountryUpper = [Country],
                             IsAll = RuleCountryUpper = "ALL",
-                            CountryList = List.Transform(Text.Split(RuleCountryUpper, ","), each Text.Trim(_)),
+                            CountryList = List.Transform(Text.Split(RuleCountryUpper, ","), each Text. Trim(_)),
                             IsInList = List.Contains(CountryList, CountryUpper)
                         in
                             IsAll or IsInList
@@ -226,7 +197,7 @@ let
         #"Foreign_Exchange [Master]", 
         {"ID"}, 
         "Foreign_Exchange [Master]", 
-        JoinKind.LeftOuter
+        JoinKind. LeftOuter
     ),
     #"Expanded FX Value" = Table.ExpandTableColumn(
         #"Merged with FX Rates", 
@@ -254,6 +225,3 @@ let
     Result = #"Removed Temporary Columns"
 in
     Result
-
-
-
