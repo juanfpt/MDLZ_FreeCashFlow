@@ -1,0 +1,46 @@
+let
+    fnGetUsername = () =>
+        let
+            Source = Folder.Contents("C:\Users\"),
+            #"Expanded Attributes" = Table. ExpandRecordColumn(Source, "Attributes", 
+                {"Hidden", "Directory", "ChangeTime"}, 
+                {"Hidden", "Directory", "ChangeTime"}
+            ),
+            #"Filtered Directories not hidden" = Table.SelectRows(#"Expanded Attributes", 
+                each [Directory] = true and [Hidden] = false
+            ),
+            #"Removed Errors" = Table.RemoveRowsWithErrors(#"Filtered Directories not hidden", {"ChangeTime"}),
+            #"Filtered Rows" = Table.SelectRows(#"Removed Errors", each [Name] <> "Public"),
+            Username = #"Filtered Rows"{0}[Name]
+        in
+            Username,
+    
+    fnGetBasePath = (username as text) as text =>
+        "C:\Users\" & username & "\MDLZ\Cash Flow Planning WACAM - Documents\Cash Flow Mensual\FCF Internal Report\",
+    
+    Username = fnGetUsername(),
+    BasePath = fnGetBasePath(Username),
+    ClassificationFilePath = BasePath & "Data Repository\Actuals\Support\Classifier. xlsx",
+    
+    Workbook = Excel.Workbook(File.Contents(ClassificationFilePath), null, true),
+    Sheet = Workbook{[Item="TaxClassification",Kind="Table"]}[Data],
+    
+    Typed = Table.TransformColumnTypes(Sheet,
+        {
+            {"Country", type text},
+            {"Keyword", type text},
+            {"Category", type text},
+            {"Priority", Int64.Type}
+        }
+    ),
+    
+    UpperCased = Table.TransformColumns(Typed,
+        {
+            {"Keyword", Text.Upper, type text},
+            {"Country", Text.Upper, type text}
+        }
+    ),
+    
+    Sorted = Table.Sort(UpperCased, {{"Priority", Order.Ascending}})
+in
+    Sorted
