@@ -1,0 +1,27 @@
+// ❌ COMENTAR ESTO TEMPORALMENTE: 
+/*
+ClassificationWorkbook = Excel.Workbook(File.Contents(ClassificationFilePath), null, true),
+ClassificationSheet = ClassificationWorkbook{[Item="TaxClassification",Kind="Table"]}[Data],
+ClassificationRules = Table.TransformColumnTypes(... ),
+ClassificationRulesUpper = Table.TransformColumns(... ),
+ClassificationRulesSorted = Table.Sort(...),
+ClassificationRulesBuffered = Table.Buffer(...),
+*/
+
+// ✅ USAR ESTO TEMPORALMENTE PARA PROBAR:
+ClassificationRulesBuffered = #table(
+    {"Country", "Keyword", "Category", "Priority"},
+    {
+        {"ALL", "WHT", "WHT (MSA / Interest)", 1},
+        {"ALL", "SELFWITHHOLDING", "WHT (MSA / Interest)", 1},
+        {"CO", "MSA", "WHT (MSA / Interest)", 1},
+        {"CO,EC,PE", "RETENCIÓN", "WHT (MSA / Interest)", 1},
+        {"PE", "ITAN", "Income Tax in advance", 1},
+        {"ALL", "ANTICIPO", "Income Tax in advance", 2},
+        {"ALL", "A CUENTA", "Income Tax in advance", 2},
+        {"MX", "IR", "Annual Income Tax", 1},
+        {"ALL", "PAGO ISR", "Annual Income Tax", 1},
+        {"ALL", "AUDIT", "Litigation", 1},
+        {"ALL", "JUDICIAL", "Litigation", 1}
+    }
+),
