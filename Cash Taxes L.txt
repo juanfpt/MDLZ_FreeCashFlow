@@ -206,7 +206,7 @@ let
     
     // CREATE FX LOOKUP KEY---------------------------------------------------------------------------------------------
     
-    #"Added FX Lookup Key" = Table.AddColumn(#"Renamed Date Column", "ID",
+    #"Added FX Lookup Key" = Table.AddColumn(#"Renamed Date Column", "ID", 
         each [Country] & 
              Date.MonthName([Key Date]) & 
              Number.ToText(Date.Year([Key Date])) & 
@@ -233,7 +233,7 @@ let
     
     // CALCULATE USD VALUE----------------------------------------------------------------------------------------------
     
-    #"Renamed Amount Column" = Table.RenameColumns(#"Expanded FX Value",
+    #"Renamed Amount Column" = Table.RenameColumns(#"Expanded FX Value", 
         {{"Amount in local currency", "Amount LC"}}
     ),
     #"Added USD Value" = Table.AddColumn(#"Renamed Amount Column", "Value", 
