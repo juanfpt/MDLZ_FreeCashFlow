@@ -21,8 +21,6 @@ let
     fnGetBasePath = (username as text) as text =>
         "C:\Users\" & username & "\MDLZ\Cash Flow Planning WACAM - Documents\Cash Flow Mensual\FCF Internal Report\",
     
-    // ❌ ELIMINAR fnCountryMatches - ya no la usaremos
-    
     // CONFIGURATION----------------------------------------------------------------------------------------------------
     
     Username = fnGetUsername(),
@@ -31,95 +29,43 @@ let
     ClassificationFilePath = BasePath & "Data Repository\Actuals\Support\Classifier.xlsx",
 
 
-    // LOAD CLASSIFICATION RULES FROM EXTERNAL EXCEL FILE--------------------------------------------------------------
+    // ✅ LOAD CLASSIFICATION RULES - CON BUFFER INMEDIATO-------------------------------------------------------------
 
     
-    ClassificationWorkbook = Excel.Workbook(File.Contents(ClassificationFilePath), null, true),
-    ClassificationSheet = ClassificationWorkbook{[Item="TaxClassification",Kind="Table"]}[Data],
-    
-    ClassificationRules = Table.TransformColumnTypes(ClassificationSheet,
-        {
-            {"Country", type text},
-            {"Keyword", type text},
-            {"Category", type text},
-            {"Priority", Int64.Type}
-        }
-    ),
-    
-    ClassificationRulesUpper = Table.TransformColumns(ClassificationRules,
-        {
-            {"Keyword", Text.Upper, type text},
-            {"Country", Text.Upper, type text}
-        }
-    ),
-    
-    ClassificationRulesSorted = Table.Sort(ClassificationRulesUpper, {{"Priority", Order.Ascending}}),
-    
-    ClassificationRulesBuffered = Table.Buffer(ClassificationRulesSorted),
-    
-
-    // ✅ CLASSIFICATION FUNCTION - REESCRITA SIN fnCountryMatches------------------------------------------------------
-
-    
-    fnClassifyTransaction = (textToClassify as text, country as text, classificationRules as table) as text =>
+    ClassificationRulesBuffered = 
         let
-            TextUpper = Text.Upper(textToClassify),
-            CountryUpper = Text.Upper(country),
+            // Cargar TODO en un solo let para que Buffer capture todo el proceso
+            Workbook = Excel.Workbook(File.Contents(ClassificationFilePath), null, true),
+            Sheet = Workbook{[Item="TaxClassification",Kind="Table"]}[Data],
             
-            // ✅ Lógica de fnCountryMatches INLINE (dentro de la función)
-            ApplicableRules = Table.SelectRows(classificationRules, 
-                each 
-                    let
-                        RuleCountryUpper = Text. Upper([Country]),
-                        IsAll = RuleCountryUpper = "ALL",
-                        CountryList = List.Transform(Text.Split(RuleCountryUpper, ","), each Text.Trim(_)),
-                        IsInList = List.Contains(CountryList, CountryUpper)
-                    in
-                        IsAll or IsInList
+            Typed = Table.TransformColumnTypes(Sheet,
+                {
+                    {"Country", type text},
+                    {"Keyword", type text},
+                    {"Category", type text},
+                    {"Priority", Int64.Type}
+                }
             ),
             
-            CountrySpecificRules = Table.SelectRows(ApplicableRules, 
-                each [Country] = CountryUpper
+            UpperCased = Table.TransformColumns(Typed,
+                {
+                    {"Keyword", Text.Upper, type text},
+                    {"Country", Text.Upper, type text}
+                }
             ),
             
-            MultiCountryRules = Table.SelectRows(ApplicableRules, 
-                each Text.Contains([Country], ",")
-            ),
+            Sorted = Table.Sort(UpperCased, {{"Priority", Order.Ascending}}),
             
-            GlobalRules = Table.SelectRows(ApplicableRules, 
-                each [Country] = "ALL"
-            ),
-            
-            // Match function by priority
-            FindMatch = (rules as table) as nullable text =>
-                let
-                    MatchingRows = Table.SelectRows(rules, 
-                        each Text.Contains(TextUpper, [Keyword])
-                    ),
-                    
-                    FirstMatch = if Table. RowCount(MatchingRows) > 0 
-                                then MatchingRows{0}[Category] 
-                                else null
-                in
-                    FirstMatch,
-            
-            // Buscar en orden:  país específico > multi-país > global
-            CountryMatch = FindMatch(CountrySpecificRules),
-            MultiCountryMatch = FindMatch(MultiCountryRules),
-            GlobalMatch = FindMatch(GlobalRules),
-            
-            FinalCategory = if CountryMatch <> null then CountryMatch 
-                            else if MultiCountryMatch <> null then MultiCountryMatch 
-                            else if GlobalMatch <> null then GlobalMatch 
-                            else "Others"
+            // Buffer TODO el resultado
+            Buffered = Table.Buffer(Sorted)
         in
-            FinalCategory,
+            Buffered,
     
 
     // DATA FOLDER PATH-------------------------------------------------------------------------------------------------
 
     
-    DataFolderPath = BasePath & "Data Repository\Actuals\3.  Cash Taxes",
+    DataFolderPath = BasePath & "Data Repository\Actuals\3.   Cash Taxes",
     
 
     // LOAD FILES FROM FOLDER------------------------------------------------------------------------------------------
@@ -127,7 +73,7 @@ let
     
     SourceFiles = Folder.Files(DataFolderPath),
     #"Filtered Hidden Files" = Table.SelectRows(SourceFiles, 
-        each [Attributes]? [Hidden]?  <> true
+        each [Attributes]?[Hidden]?  <> true
     ),
     
     // TRANSFORM FILES-------------------------------------------------------------------------------------------------
@@ -141,7 +87,7 @@ let
     #"Expanded Transformed Data" = Table.ExpandTableColumn(
         #"Selected Relevant Columns", 
         "Transform File", 
-        Table.ColumnNames(#"Transform File"(#"Sample File"))
+        Table. ColumnNames(#"Transform File"(#"Sample File"))
     ),
     
     // DATA TYPE TRANSFORMATIONS----------------------------------------------------------------------------------------
@@ -189,10 +135,72 @@ let
         {"Country"}
     ),
     
-    // ADD BUSINESS LOGIC - Description categorization using classification table + country + priority------------------
+    // ADD DESCRIPTION - TODO INLINE (SIN FUNCIÓN)----------------------------------------------------------------------
     
     #"Added Description Category" = Table.AddColumn(#"Expanded Country Column", "Description", 
-        each fnClassifyTransaction([Text], [Country], ClassificationRulesBuffered),
+        each 
+            let
+                TextUpper = Text.Upper([Text]),
+                CountryUpper = Text. Upper([Country]),
+                
+                // Filtrar reglas aplicables al país
+                ApplicableRules = Table.SelectRows(ClassificationRulesBuffered, 
+                    each 
+                        let
+                            RuleCountryUpper = [Country],
+                            IsAll = RuleCountryUpper = "ALL",
+                            CountryList = List.Transform(Text.Split(RuleCountryUpper, ","), each Text.Trim(_)),
+                            IsInList = List.Contains(CountryList, CountryUpper)
+                        in
+                            IsAll or IsInList
+                ),
+                
+                // Reglas específicas del país
+                CountrySpecificRules = Table.SelectRows(ApplicableRules, 
+                    each [Country] = CountryUpper
+                ),
+                
+                // Reglas multi-país
+                MultiCountryRules = Table.SelectRows(ApplicableRules, 
+                    each Text.Contains([Country], ",")
+                ),
+                
+                // Reglas globales
+                GlobalRules = Table.SelectRows(ApplicableRules, 
+                    each [Country] = "ALL"
+                ),
+                
+                // Buscar match en reglas específicas del país
+                CountryMatchRows = Table.SelectRows(CountrySpecificRules, 
+                    each Text.Contains(TextUpper, [Keyword])
+                ),
+                CountryMatch = if Table. RowCount(CountryMatchRows) > 0 
+                              then CountryMatchRows{0}[Category] 
+                              else null,
+                
+                // Buscar match en reglas multi-país
+                MultiMatchRows = Table.SelectRows(MultiCountryRules, 
+                    each Text.Contains(TextUpper, [Keyword])
+                ),
+                MultiMatch = if Table.RowCount(MultiMatchRows) > 0 
+                            then MultiMatchRows{0}[Category] 
+                            else null,
+                
+                // Buscar match en reglas globales
+                GlobalMatchRows = Table.SelectRows(GlobalRules, 
+                    each Text.Contains(TextUpper, [Keyword])
+                ),
+                GlobalMatch = if Table.RowCount(GlobalMatchRows) > 0 
+                             then GlobalMatchRows{0}[Category] 
+                             else null,
+                
+                // Determinar categoría final
+                FinalCategory = if CountryMatch <> null then CountryMatch 
+                               else if MultiMatch <> null then MultiMatch 
+                               else if GlobalMatch <> null then GlobalMatch 
+                               else "Others"
+            in
+                FinalCategory,
         type text
     ),
     
@@ -218,7 +226,7 @@ let
         #"Foreign_Exchange [Master]", 
         {"ID"}, 
         "Foreign_Exchange [Master]", 
-        JoinKind. LeftOuter
+        JoinKind.LeftOuter
     ),
     #"Expanded FX Value" = Table.ExpandTableColumn(
         #"Merged with FX Rates", 
@@ -246,5 +254,6 @@ let
     Result = #"Removed Temporary Columns"
 in
     Result
+
 
 
