@@ -70,7 +70,7 @@ let
             // Si se encuentra, retornar la tasa, si no, usar FCST3 por defecto
             Result = if Table. RowCount(MatchingRow) > 0 
                     then MatchingRow{0}[FX_Base_Rate]
-                    else "FCST3"  // Tasa por defecto
+                    else "CONTRACT"  // Tasa por defecto
         in
             Result,
     
