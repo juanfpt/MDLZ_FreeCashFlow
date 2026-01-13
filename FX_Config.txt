@@ -1,0 +1,47 @@
+let
+    fnGetUsername = () =>
+        let
+            Source = Folder.Contents("C:\Users\"),
+            #"Expanded Attributes" = Table. ExpandRecordColumn(Source, "Attributes", 
+                {"Hidden", "Directory", "ChangeTime"}, 
+                {"Hidden", "Directory", "ChangeTime"}
+            ),
+            #"Filtered Directories not hidden" = Table.SelectRows(#"Expanded Attributes", 
+                each [Directory] = true and [Hidden] = false
+            ),
+            #"Removed Errors" = Table.RemoveRowsWithErrors(#"Filtered Directories not hidden", {"ChangeTime"}),
+            #"Filtered Rows" = Table.SelectRows(#"Removed Errors", each [Name] <> "Public"),
+            Username = #"Filtered Rows"{0}[Name]
+        in
+            Username,
+    
+    fnGetBasePath = (username as text) as text =>
+        "C:\Users\" & username & "\MDLZ\Cash Flow Planning WACAM - Documents\Cash Flow Mensual\FCF Internal Report\",
+    
+    Username = fnGetUsername(),
+    BasePath = fnGetBasePath(Username),
+    FXConfigFilePath = BasePath & "Code Instructions\Support\FX_Rate_Config.xlsx",
+    
+    // Cargar Excel
+    Workbook = Excel.Workbook(File. Contents(FXConfigFilePath), null, true),
+    
+    // Obtener la tabla FX_Config
+    FXConfigSheet = Workbook{[Item="FX_Config",Kind="Table"]}[Data],
+    
+    // Transformar tipos
+    TypedTable = Table.TransformColumnTypes(FXConfigSheet,
+        {
+            {"Profile", type text},
+            {"FX_Base_Rate", type text}
+        }
+    ),
+    
+    // Convertir a mayúsculas para matching case-insensitive
+    UpperCased = Table.TransformColumns(TypedTable,
+        {
+            {"Profile", Text.Upper, type text},
+            {"FX_Base_Rate", Text.Upper, type text}
+        }
+    )
+in
+    UpperCased
