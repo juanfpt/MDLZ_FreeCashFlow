@@ -65,6 +65,7 @@ let
     #"Added Custom3" = Table.AddColumn(#"Renamed Columns3", "Value", each [LC]/[FX Value]),
     #"Changed Type4" = Table.TransformColumnTypes(#"Added Custom3",{{"Value", type number}}),
     #"Removed Columns1" = Table.RemoveColumns(#"Changed Type4",{"Key Date", "Country", "ID", "FX Value"}),
-    #"Added Custom6" = Table.AddColumn(#"Removed Columns1", "Profile", each Scenario)
+    #"Added Custom6" = Table.AddColumn(#"Removed Columns1", "Profile", each Scenario),
+    #"Changed Type7" = Table.TransformColumnTypes(#"Added Custom6",{{"Profile", type text}})
 in
-    #"Added Custom6"
+    #"Changed Type7"
