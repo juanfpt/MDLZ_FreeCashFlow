@@ -42,74 +42,59 @@ let
     
     Username = fnGetUsername(),
     BasePath = fnGetBasePath(Username),
-    BIFolderPath = BasePath & "Data Repository\Actuals\3.   Cash Taxes\BI",
+    BIFolderPath = BasePath & "Data Repository\Actuals\3.  Cash Taxes\BI",
     
     // LOAD FILES FROM FOLDER-----------------------------------------------------------------------------------
     
     SourceFiles = Folder.Files(BIFolderPath),
     
-    // Filter hidden files and non-Excel files
+    // Filter hidden files and CSV files only
     #"Filtered Hidden Files" = Table.SelectRows(SourceFiles, 
         each [Attributes]? [Hidden]?  <> true
     ),
     
-    #"Filtered Excel Files" = Table.SelectRows(#"Filtered Hidden Files",
-        each Text.EndsWith([Name], ".xlsx") or Text.EndsWith([Name], ".xls")
+    // ✅ CAMBIO: Filtrar solo archivos CSV
+    #"Filtered CSV Files" = Table.SelectRows(#"Filtered Hidden Files",
+        each Text.EndsWith([Name], ".csv")
     ),
     
-    // Extract Year from filename (assumes filename is like "2024. xlsx" or "2025.xlsx")
-    #"Added Year from Filename" = Table.AddColumn(#"Filtered Excel Files", "Year", 
+    // Extract Year from filename (assumes filename is like "2024.csv" or "2025.csv")
+    #"Added Year from Filename" = Table. AddColumn(#"Filtered CSV Files", "Year", 
         each 
             let
-                FileName = Text.BeforeDelimiter([Name], ". "),  // Obtiene "2024" de "2024.xlsx"
+                FileName = Text.BeforeDelimiter([Name], ". "),  // Obtiene "2024" de "2024.csv"
                 YearNumber = try Number.From(FileName) otherwise null
             in
                 YearNumber,
         Int64.Type
     ),
     
-    // Load Excel content
-    #"Added Excel Content" = Table.AddColumn(#"Added Year from Filename", "ExcelData", 
-        each try Excel. Workbook([Content], null, true) otherwise null
+    // ✅ CAMBIO: Load CSV content (en lugar de Excel. Workbook)
+    #"Added CSV Content" = Table.AddColumn(#"Added Year from Filename", "CSVData", 
+        each try Csv.Document([Content], [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.None]) otherwise null
     ),
     
     // Filter successfully loaded files
-    #"Filtered Loaded Files" = Table.SelectRows(#"Added Excel Content", 
-        each [ExcelData] <> null
+    #"Filtered Loaded Files" = Table.SelectRows(#"Added CSV Content", 
+        each [CSVData] <> null
     ),
     
-    // Expand to get sheets
-    #"Expanded Excel Sheets" = Table.ExpandTableColumn(#"Filtered Loaded Files", "ExcelData", 
-        {"Name", "Data", "Kind"}, 
-        {"SheetName", "SheetData", "ItemKind"}
+    // ✅ CAMBIO:  Promote headers for CSV
+    #"Promoted Headers in Files" = Table.AddColumn(#"Filtered Loaded Files", "DataWithHeaders",
+        each Table.PromoteHeaders([CSVData], [PromoteAllScalars=true])
     ),
     
-    // Filter only sheets (not tables or named ranges)
-    #"Filtered Sheets Only" = Table.SelectRows(#"Expanded Excel Sheets", 
-        each [ItemKind] = "Sheet"
+    // Add Year column to each file's data before combining
+    #"Added Year to Data" = Table.AddColumn(#"Promoted Headers in Files", "DataWithYear",
+        each Table.AddColumn([DataWithHeaders], "FileYear", (row) => [Year], Int64.Type)
     ),
     
-    // Promote headers
-    #"Promoted Headers in Sheets" = Table.AddColumn(#"Filtered Sheets Only", "DataWithHeaders",
-        each Table.PromoteHeaders([SheetData], [PromoteAllScalars=true])
-    ),
-    
-    // Select only needed columns before combining
-    #"Select Relevant Columns" = Table.SelectColumns(#"Promoted Headers in Sheets",
-        {"Year", "DataWithHeaders"}
-    ),
-    
-    // Add Year column to each sheet's data before combining
-    #"Added Year to Data" = Table.AddColumn(#"Select Relevant Columns", "DataWithYear",
-        each Table.AddColumn([DataWithHeaders], "FileYear", each [Year], Int64.Type)
-    ),
-    
-    // Combine all sheets from all files
-    #"Combined All Sheets" = Table.Combine(#"Added Year to Data"[DataWithYear]),
+    // Combine all CSV files
+    #"Combined All Files" = Table.Combine(#"Added Year to Data"[DataWithYear]),
     
     // DATA TYPE TRANSFORMATIONS--------------------------------------------------------------------------------
     
-    #"Changed Initial Types" = Table.TransformColumnTypes(#"Combined All Sheets",
+    #"Changed Initial Types" = Table.TransformColumnTypes(#"Combined All Files",
         {
             {"Country", type text},
             {"Description", type text},
@@ -144,9 +129,9 @@ let
         {"Country", "Description", "Key Date", "CT. Actual"}
     ),
     
-    // RENAME COLUMNS (opcional)--------------------------------------------------------------------------------
+    // RENAME COLUMNS-------------------------------------------------------------------------------------------
     
-    #"Renamed Columns" = Table.RenameColumns(#"Reordered Columns",
+    #"Renamed Columns" = Table. RenameColumns(#"Reordered Columns",
         {{"CT. Actual", "Value"}}
     ),
     
