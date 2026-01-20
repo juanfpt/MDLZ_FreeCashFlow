@@ -1,9 +1,50 @@
-(FPA_Scenario as table, Year as text) as table =>
+(RelativeFilePath as text, Scenario as text, Year as text) as table =>
 let
 
-    //Query already created ========================================================================================================
+    //Get system username ========================================================================================================
 
-    PL_FPA = #"PL_FPA",
+    fnGetUsername = () =>
+        let
+            Source = Folder.Contents("C:\Users\"),
+            #"Expanded Attributes" = Table.ExpandRecordColumn(Source, "Attributes", {"Hidden", "Directory", "ChangeTime"}, {"Hidden", "Directory", "ChangeTime"}),
+            #"Filtered Directories not hidden" = Table.SelectRows(#"Expanded Attributes", each ([Directory] = true) and ([Hidden] = false)),
+            #"Removed Errors" = Table.RemoveRowsWithErrors(#"Filtered Directories not hidden", {"ChangeTime"}),
+	    #"Filtered Rows" = Table.SelectRows(#"Removed Errors", each ([Name] <> "Public")),
+	    Username = #"Filtered Rows"{0}[Name]
+        in
+            Username,
+		
+    //Get Base Path ========================================================================================================
+
+    fnGetBasePath = (username as text) as text =>
+        "C:\Users\" & username & "\MDLZ\Cash Flow Planning WACAM - Documents\Cash Flow Mensual\FCF Internal Report\",
+
+    //Get Username and Base Path ========================================================================================================
+
+    Username = fnGetUsername(),
+    BasePath = fnGetBasePath(Username),
+
+    //Load FPA_File_Upload explicitly ========================================================================================================
+
+    fnFPA_File_Upload = let
+        FilePath = BasePath & "Code Instructions\FPA_File_Upload.txt",
+        FileContent = Text.FromBinary(File.Contents(FilePath)),
+        Result = Expression.Evaluate(FileContent, #shared)
+    in
+        Result,
+
+    //Invoke FPA_File_Upload with parameters ========================================================================================================
+
+    FPA_Scenario = fnFPA_File_Upload(RelativeFilePath, Scenario, Year),
+
+    //Load PL_FPA explicitly ========================================================================================================
+
+    PL_FPA = let
+        FilePath = BasePath & "Code Instructions\PL_FPA.txt",
+        FileContent = Text.FromBinary(File.Contents(FilePath)),
+        Result = Expression.Evaluate(FileContent, #shared)
+    in
+        Result,
 
     //Main Function ====================================================================================================================
 
